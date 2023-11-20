@@ -27,8 +27,8 @@ load_spec :: proc(filename: string) -> (json.Value) {
   return json_data
 }
 
-convert :: proc(val: json.Value) -> (Input) {
-  input: Input
+convert :: proc(val: json.Value) -> (Data) {
+  input: Data
   #partial switch v in val {
     case json.Null:
       input = ""
@@ -43,14 +43,14 @@ convert :: proc(val: json.Value) -> (Input) {
     case:
       input = ""
     case json.Object:
-      data: Data
+      data := make(map[string]Data, allocator=context.temp_allocator)
       for key, val in v {
-        fmt.printf("key: %v, val: %v\n", key, val)
         new_k := string(key)
         new_v := convert(val)
         data[new_k] = new_v
       }
       input = data
+
     // TODO: Handle arrays.
     case json.Array:
       input = ""
@@ -59,9 +59,10 @@ convert :: proc(val: json.Value) -> (Input) {
   return input
 }
 
+// TODO: Better printing and logging if .expect() fails.
 assert_mustache :: proc(t: ^testing.T,
                         input: string,
-                        data: Input,
+                        data: Data,
                         exp_output: string,
                         loc := #caller_location) {
   output, _ := process_template(input, data)
@@ -71,7 +72,7 @@ assert_mustache :: proc(t: ^testing.T,
 @(test)
 test_basic :: proc(t: ^testing.T) {
   template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
-  data := Data {
+  data := map[string]Data {
     "x" = "Ben",
     "y" = "R2D2"
   }
@@ -113,26 +114,17 @@ test_interpolation :: proc(t: ^testing.T) {
       break
     }
 
-    fmt.println("*************************")
-    fmt.println(test)
     test_obj := test.(json.Object)
     test_name := test_obj["name"].(string)
     test_desc := test_obj["desc"].(string)
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
-
-    // Object is map[string]Value
-    // Value is a union type containing:
-    // Null, 
-	  // i64, 
-	  // f64, 
-	  // bool, 
-	  // string, 
-	  // Array, 
-	  // Object, 
-
     data := test_obj["data"]
     input := convert(data)
+
+    // TODO: Only print the name & desc if the test FAILS.
+    fmt.println("*************************")
+    fmt.println(test_name, "-", test_desc)
     assert_mustache(t, template, input, exp_output)
   }
 }
