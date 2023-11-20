@@ -7,7 +7,14 @@ import "core:strings"
 import "core:strconv"
 
 OTAG :: "{{"
+OTAG_TRIPLE :: "{{{"
 CTAG :: "}}"
+CTAG_TRIPLE :: "}}}"
+
+HTML_LESS_THAN :: "&lt;"
+HTML_GREATER_THAN :: "&gt;"
+HTML_QUOTE :: "&quot;"
+HTML_AMPERSAND :: "&amp;"
 
 Error :: enum {
   None,
@@ -46,7 +53,8 @@ TextTag :: struct {
 }
 
 DataTag :: struct {
-  key: string
+  key: string,
+  escape: bool
 }
 
 active_str :: proc(tmpl: ^Template) -> (string) {
@@ -61,28 +69,38 @@ active_str :: proc(tmpl: ^Template) -> (string) {
 /*
 
 */
-parse_string :: proc(tmpl: ^Template) -> (bool) {
+parse_string :: proc(tmpl: ^Template) -> (ok: bool) {
   str := active_str(tmpl)
 
   // otag_pos IS RELATIVE to the active string.
-  otag_pos := strings.index(active_str(tmpl), OTAG)  
+  otag_pos := strings.index(str, OTAG)  
+  otag_triple_pos := strings.index(str, OTAG_TRIPLE)  
 
-  // If we did not find an open tag, set our pointer to the
-  // end of the string, add the remaining text as a TextTag,
-  // and return.
-  if otag_pos == -1 {
+  if otag_triple_pos > -1 {
+    ok = parse_triple_tag(tmpl)
+  } else if otag_pos > -1 {
+    ok = parse_standard_tag(tmpl)
+  } else {
+    // If we did not find an open tag, set our pointer to the
+    // end of the string, add the remaining text as a TextTag,
+    // and return.
     tmpl.pos = len(tmpl.str)
     append(&tmpl.tags, TextTag{str})
-    return true
+    ok = true
   }
 
-  // The actual content inside the tag starts two places
-  // after the start of the tag.
-  tagstart_pos := otag_pos + len(OTAG)
+  return ok
+}
+
+parse_standard_tag :: proc(tmpl: ^Template) -> (bool) {
+  str := active_str(tmpl)
+  otag_pos := strings.index(str, OTAG)  
+
+  tag_content_start_pos := otag_pos + len(OTAG)
 
   // Text to seek for the closing tag is from the start
   // of the tag content until the end of the string.
-  seek := strings.cut(str, tagstart_pos, allocator=context.temp_allocator)
+  seek := strings.cut(str, tag_content_start_pos, allocator=context.temp_allocator)
 
   ctag_pos := strings.index(seek, CTAG)
 
@@ -102,13 +120,77 @@ parse_string :: proc(tmpl: ^Template) -> (bool) {
 
   // Get the data_id (eg., the content inside the tag) and
   // store it as a DataTag.
-  data_id := strings.cut(str, tagstart_pos, ctag_pos, context.temp_allocator)
-  append(&tmpl.tags, DataTag{data_id})
+  data_id := strings.cut(str, tag_content_start_pos, ctag_pos, context.temp_allocator)
+  append(&tmpl.tags, DataTag{key=data_id, escape=true})
 
   // Increment our position cursor (this is ABSOLUTE position).
-  tmpl.pos = tmpl.pos + tagstart_pos + ctag_pos + len(CTAG)
+  tmpl.pos = tmpl.pos + tag_content_start_pos + ctag_pos + len(CTAG)
 
   return true
+}
+
+parse_triple_tag :: proc(tmpl: ^Template) -> (bool) {
+  str := active_str(tmpl)
+  otag_pos := strings.index(str, OTAG_TRIPLE)  
+
+  tag_content_start_pos := otag_pos + len(OTAG_TRIPLE)
+
+  // Text to seek for the closing tag is from the start
+  // of the tag content until the end of the string.
+  seek := strings.cut(str, tag_content_start_pos, allocator=context.temp_allocator)
+
+  ctag_pos := strings.index(seek, CTAG_TRIPLE)
+
+  // If we could not find a matching closing tag, return
+  // with a failure signal.
+  if ctag_pos == -1 {
+    fmt.println("No triple closing tag found from position:", tmpl.pos)
+    return false
+  }
+
+  // Now that we know we have a valid chunk of text with a
+  // tag inside of it, store all the text leading up to the
+  // opening tag as "preceding" and put it inside a TextTag.
+  // tmpl.pos is always ABSOLUTE position.
+  preceding := strings.cut(tmpl.str, tmpl.pos, otag_pos, context.temp_allocator)
+  append(&tmpl.tags, TextTag{preceding})
+
+  // Get the data_id (eg., the content inside the tag) and
+  // store it as a DataTag.
+  data_id := strings.cut(str, tag_content_start_pos, ctag_pos, context.temp_allocator)
+  append(&tmpl.tags, DataTag{key=data_id, escape=false})
+
+  // Increment our position cursor (this is ABSOLUTE position).
+  tmpl.pos = tmpl.pos + tag_content_start_pos + ctag_pos + len(CTAG_TRIPLE)
+
+  return true
+}
+
+trim_decimal_string :: proc(s: string) -> string {
+	if len(s) == 0 || s[len(s)-1] != '0' {
+		return s
+	}
+
+	// We have at least one trailing zero. Search backwards and find the rest.
+	trailing_start_idx := len(s)-1
+	for i := len(s) - 2; i >= 0 ; i -= 1 {
+		switch s[i] {
+			case '0':
+				if trailing_start_idx == i + 1 {
+					trailing_start_idx = i
+				}
+
+			case '.':
+				if trailing_start_idx == i + 1 {
+					// Removes point completely for numbers like 0.000
+					trailing_start_idx = i
+				}
+
+				return s[:trailing_start_idx]
+		}
+	}
+
+	return s
 }
 
 /*
@@ -118,6 +200,8 @@ parse_string :: proc(tmpl: ^Template) -> (bool) {
 */
 render_template :: proc(tmpl: Template) -> (string, bool) {
   strs: [dynamic]string
+
+  fmt.println(tmpl.tags)
 
   for tag in tmpl.tags {
     switch t in tag {
@@ -130,8 +214,29 @@ render_template :: proc(tmpl: Template) -> (string, bool) {
           case string:
             append(&strs, d)
           case map[string]Data:
-            data := d[t.key]
-            str := data.(string)
+            key: string
+            escape := t.escape
+            // Key prefixed with "&" should be like a triple tag.
+            if strings.has_prefix(t.key, "&") {
+              key = strings.trim_prefix(t.key, "&")
+              escape = false
+            } else {
+              key = t.key
+            }
+
+            str: string
+            data, ok := d[key]
+            if !ok {
+              fmt.println("Could not find", t.key, "in", d)
+              str = ""
+            } else {
+              str = data.(string)
+            }
+
+            if escape {
+              str = escape_html_string(str)
+            }
+
             append(&strs, str)
         }
     }
@@ -142,7 +247,21 @@ render_template :: proc(tmpl: Template) -> (string, bool) {
     allocator=context.temp_allocator
   )
   delete(strs)
+
+  fmt.println("Rendered:", rendered)
   return rendered, true
+}
+
+escape_html_string :: proc(s: string, allocator := context.allocator) -> (string) {
+  context.allocator = allocator
+
+  escaped := s
+  // Ampersand escaping goes first.
+  escaped, _ = strings.replace_all(escaped, "&", HTML_AMPERSAND)
+  escaped, _ = strings.replace_all(escaped, "<", HTML_LESS_THAN)
+  escaped, _ = strings.replace_all(escaped, ">", HTML_GREATER_THAN)
+  escaped, _ = strings.replace_all(escaped, "\"", HTML_QUOTE)
+  return escaped
 }
 
 /*

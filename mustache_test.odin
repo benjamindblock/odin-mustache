@@ -33,9 +33,11 @@ convert :: proc(val: json.Value) -> (Data) {
     case json.Null:
       input = ""
     case i64:
-      input = fmt.aprintf("%v", v)
+      decimal_str := fmt.aprintf("%v", v)
+      input = trim_decimal_string(decimal_str)
     case f64:
-      input = fmt.aprintf("%v", v)
+      decimal_str := fmt.aprintf("%v", v)
+      input = trim_decimal_string(decimal_str)
     case bool:
       input = fmt.aprintf("%v", v)
     case string:
@@ -66,7 +68,7 @@ assert_mustache :: proc(t: ^testing.T,
                         exp_output: string,
                         loc := #caller_location) {
   output, _ := process_template(input, data)
-  testing.expect(t, exp_output == output)
+  testing.expect_value(t, output, exp_output, loc)
 }
 
 @(test)
@@ -82,27 +84,6 @@ test_basic :: proc(t: ^testing.T) {
 
 @(test)
 test_interpolation :: proc(t: ^testing.T) {
-  when ODIN_DEBUG {
-    track: mem.Tracking_Allocator
-    mem.tracking_allocator_init(&track, context.allocator)
-    context.allocator = mem.tracking_allocator(&track)
-    defer {
-      if len(track.allocation_map) > 0 {
-        fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
-        for _, entry in track.allocation_map {
-          fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
-        }
-      }
-      if len(track.bad_free_array) > 0 {
-        fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
-        for entry in track.bad_free_array {
-          fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
-        }
-      }
-      mem.tracking_allocator_destroy(&track)
-    }
-  }
-
   spec := load_spec(INTERPOLATION)
   defer json.destroy_value(spec)
 
@@ -110,7 +91,7 @@ test_interpolation :: proc(t: ^testing.T) {
   tests := root["tests"].(json.Array)
 
   for test, i in tests {
-    if i > 1 {
+    if i > 17 {
       break
     }
 
@@ -125,6 +106,8 @@ test_interpolation :: proc(t: ^testing.T) {
     // TODO: Only print the name & desc if the test FAILS.
     fmt.println("*************************")
     fmt.println(test_name, "-", test_desc)
+    fmt.println("Input:", template)
+    fmt.println("Expected:", exp_output)
     assert_mustache(t, template, input, exp_output)
   }
 }
