@@ -9,6 +9,18 @@ import "core:strconv"
 OTAG :: "{{"
 CTAG :: "}}"
 
+// All data provided will either be:
+// 1. A string
+// 2. A mapping from string => string
+// 3. A mapping from string => nested mapping
+Data :: distinct map[string]Input
+
+// TODO: Input is a bad name for this...
+Input :: union {
+  Data,
+  string
+}
+
 /*
 
 */
@@ -18,7 +30,7 @@ Template :: struct {
   // Points to the current position in str when parsing.
   pos: int,
   tags: [dynamic]Tag,
-  data: map[string]string
+  data: Input
 }
 
 Tag :: union {
@@ -107,8 +119,15 @@ render_template :: proc(tmpl: Template) -> (string, bool) {
       case TextTag:
         append(&strs, t.str)
       case DataTag:
-        data := tmpl.data[t.key]
-        append(&strs, data)
+        switch d in tmpl.data {
+          case string:
+            append(&strs, d)
+          // TODO: Does not handle nested keys right now.
+          case Data:
+            input := d[t.key]
+            str := input.(string)
+            append(&strs, str)
+        }
     }
   }
 
@@ -118,7 +137,7 @@ render_template :: proc(tmpl: Template) -> (string, bool) {
 /*
 
 */
-mustache :: proc(str: string, data: map[string]string) -> (string, bool) {
+process_template :: proc(str: string, data: Input) -> (string, bool) {
   ok: bool
   output: string
   tmpl := &Template{
@@ -128,7 +147,7 @@ mustache :: proc(str: string, data: map[string]string) -> (string, bool) {
     data                // Data to insert inside the mustache tags
   }
 
-  when ODIN_DEBUG {
+  when ODIN_DEBUG && !ODIN_TEST {
     fmt.printf("\n====== STARTING MUSTACHE PROCESS\n")
     fmt.printf("%v\n", tmpl)
   }
@@ -140,7 +159,7 @@ mustache :: proc(str: string, data: map[string]string) -> (string, bool) {
       return "", false
     }
 
-    when ODIN_DEBUG {
+    when ODIN_DEBUG && !ODIN_TEST {
       fmt.println("\n====== AFTER parse_string(...)")
       fmt.println(tmpl)
     }
@@ -181,11 +200,11 @@ main :: proc() {
   }
 
   input := "Hello, {{x}}, nice to meet you. My name is {{y}}."
-  data: map[string]string
+  data: Data
   data["x"] = "Ben"
-  data["y"] = "C3PO"
+  data["y"] = "R2D2"
 
-  output, ok := mustache(input, data)
+  output, ok := process_template(input, data)
   if !ok {
     fmt.println("Mustache failed. Exiting...")
     os.exit(1)
