@@ -6,11 +6,30 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 
+/*
+  A section is like:
+  {{#person}}
+    Hello!
+  {{/person}
+*/
+SECTION_OPEN :: "{{#"
+SECTION_TRIPLE_OPEN :: "{{{#"
+SECTION_CLOSE :: "{{/"
+SECTION_TRIPLE_CLOSE :: "{{{/"
+
+/*
+  Normal interpolation is like:
+  Hello, {{name}}!
+*/
 OTAG :: "{{"
 OTAG_TRIPLE :: "{{{"
 CTAG :: "}}"
 CTAG_TRIPLE :: "}}}"
 
+/*
+  Special characters that will receive HTML-escaping
+  treatment, if necessary.
+*/
 HTML_LESS_THAN :: "&lt;"
 HTML_GREATER_THAN :: "&gt;"
 HTML_QUOTE :: "&quot;"
@@ -72,12 +91,18 @@ active_str :: proc(tmpl: ^Template) -> (string) {
 parse_string :: proc(tmpl: ^Template) -> (ok: bool) {
   str := active_str(tmpl)
 
-  // otag_pos IS RELATIVE to the active string.
-  otag_pos := strings.index(str, OTAG)  
+  otag_triple_section := strings.index(str, SECTION_TRIPLE_OPEN)
   otag_triple_pos := strings.index(str, OTAG_TRIPLE)  
+  otag_section := strings.index(str, SECTION_OPEN)  
+  otag_pos := strings.index(str, OTAG)  
 
-  if otag_triple_pos > -1 {
+  if otag_triple_section > -1 {
+    // TODO: Add triple section parsing.
+  } else if otag_triple_pos > -1 {
     ok = parse_triple_tag(tmpl)
+  } else if otag_section > -1 {
+    // TODO: Add normal section parsing.
+    ok = parse_section(tmpl)
   } else if otag_pos > -1 {
     ok = parse_standard_tag(tmpl)
   } else {
@@ -129,38 +154,34 @@ parse_standard_tag :: proc(tmpl: ^Template) -> (bool) {
   return true
 }
 
+// TODO: Fill in.
+// input := "Hello, {{#person}}{{name}}{{/person}}"
+parse_section :: proc(tmpl: ^Template) -> (bool) {
+  tmpl.pos = len(tmpl.str)
+  return true
+}
+
 parse_triple_tag :: proc(tmpl: ^Template) -> (bool) {
   str := active_str(tmpl)
-  otag_pos := strings.index(str, OTAG_TRIPLE)  
 
+  otag_pos := strings.index(str, OTAG_TRIPLE)  
   tag_content_start_pos := otag_pos + len(OTAG_TRIPLE)
 
-  // Text to seek for the closing tag is from the start
-  // of the tag content until the end of the string.
-  seek := strings.cut(str, tag_content_start_pos, allocator=context.temp_allocator)
-
-  ctag_pos := strings.index(seek, CTAG_TRIPLE)
-
-  // If we could not find a matching closing tag, return
-  // with a failure signal.
+  seek_for_ctag := strings.cut(str, tag_content_start_pos, allocator=context.temp_allocator)
+  ctag_pos := strings.index(seek_for_ctag, CTAG_TRIPLE)
   if ctag_pos == -1 {
     fmt.println("No triple closing tag found from position:", tmpl.pos)
     return false
   }
 
-  // Now that we know we have a valid chunk of text with a
-  // tag inside of it, store all the text leading up to the
-  // opening tag as "preceding" and put it inside a TextTag.
-  // tmpl.pos is always ABSOLUTE position.
-  preceding := strings.cut(tmpl.str, tmpl.pos, otag_pos, context.temp_allocator)
-  append(&tmpl.tags, TextTag{preceding})
+  before_tag := strings.cut(tmpl.str, tmpl.pos, otag_pos, context.temp_allocator)
+  append(&tmpl.tags, TextTag{before_tag})
 
-  // Get the data_id (eg., the content inside the tag) and
-  // store it as a DataTag.
   data_id := strings.cut(str, tag_content_start_pos, ctag_pos, context.temp_allocator)
   append(&tmpl.tags, DataTag{key=data_id, escape=false})
 
-  // Increment our position cursor (this is ABSOLUTE position).
+  // Increment our position cursor (this is ABSOLUTE position) to
+  // the character after the closing tag.
   tmpl.pos = tmpl.pos + tag_content_start_pos + ctag_pos + len(CTAG_TRIPLE)
 
   return true
@@ -193,6 +214,35 @@ trim_decimal_string :: proc(s: string) -> string {
 	return s
 }
 
+extract_data :: proc(data: map[string]Data, tag: DataTag) -> (string) {
+  output: string
+  key := tag.key
+  escape_html := tag.escape
+
+  // Key prefixed with "&" should be like a triple tag.
+  if strings.has_prefix(key, "&") {
+    key = strings.trim_prefix(key, "&")
+    escape_html = false
+  }
+
+  dotted_keys := strings.split(key, ".", allocator=context.temp_allocator)
+  fmt.println(dotted_keys)
+
+  data, ok := data[key]
+  if !ok {
+    fmt.println("Could not find", key, "in", data)
+    output = ""
+  } else {
+    output = data.(string)
+  }
+
+  if escape_html {
+    output = escape_html_string(output)
+  }
+
+  return output
+}
+
 /*
   Renders a template by walking through each Tag and
   turning it into a string. At the end, the list of
@@ -203,40 +253,18 @@ render_template :: proc(tmpl: Template) -> (string, bool) {
 
   fmt.println(tmpl.tags)
 
-  for tag in tmpl.tags {
-    switch t in tag {
+  for _tag in tmpl.tags {
+    switch tag in _tag {
       case TextTag:
-        append(&strs, t.str)
+        append(&strs, tag.str)
       // TODO: Does not handle nested keys.
       // TODO: Does not handle arrays.
       case DataTag:
-        switch d in tmpl.data {
+        switch data in tmpl.data {
           case string:
-            append(&strs, d)
+            append(&strs, data)
           case map[string]Data:
-            key: string
-            escape := t.escape
-            // Key prefixed with "&" should be like a triple tag.
-            if strings.has_prefix(t.key, "&") {
-              key = strings.trim_prefix(t.key, "&")
-              escape = false
-            } else {
-              key = t.key
-            }
-
-            str: string
-            data, ok := d[key]
-            if !ok {
-              fmt.println("Could not find", t.key, "in", d)
-              str = ""
-            } else {
-              str = data.(string)
-            }
-
-            if escape {
-              str = escape_html_string(str)
-            }
-
+            str := extract_data(data, tag)
             append(&strs, str)
         }
     }
@@ -308,11 +336,12 @@ process_template :: proc(str: string, data: Data) -> (string, bool) {
 }
 
 _main :: proc() -> (err: Error) {
-  input := "Hello, {{x}}, nice to meet you. My name is {{y}}."
+  input := "Hello, {{#person}}{{name}}{{/person}}"
   data: map[string]Data
   defer delete(data)
-  data["x"] = "Ben"
-  data["y"] = "R2D2"
+  data["person"] = map[string]Data {
+    "name" = "ben"
+  }
 
   output, ok := process_template(input, data)
   defer free_all(context.temp_allocator)
