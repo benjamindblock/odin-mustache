@@ -12,9 +12,11 @@ TAG_END :: '}'
 SECTION_START :: '#'
 SECTION_END :: '/'
 LITERAL :: '&'
+COMMENT :: '!'
 
 STANDARD_CLOSE :: "}}"
 LITERAL_CLOSE :: "}}}"
+COMMENT_OPEN :: "{{!"
 
 /*
   Special characters that will receive HTML-escaping
@@ -31,20 +33,22 @@ Error :: enum {
 }
 
 TokenType :: enum {
-	Text,
-	Tag,
-	TagLiteral,
-	TagLiteralTriple,
-	SectionOpen,
-	SectionClose,
-	EOF // The last token parsed, caller should not call again.
+  Text,
+  Tag,
+  TagLiteral,
+  TagLiteralTriple,
+  SectionOpen,
+  SectionClose,
+  Comment,
+  CommentStandalone,
+  EOF // The last token parsed, caller should not call again.
 }
 
 // TODO: Just store the beginning/end position of the string
 // rather than the entire string as the value...
 Token :: struct {
-	type: TokenType,
-	value: string,
+  type: TokenType,
+  value: string,
   start_pos: int,
   end_pos: int
 }
@@ -55,7 +59,8 @@ Lexer :: struct {
   tokens: [dynamic]Token,
   cur_token_type: TokenType,
   last_token_start_pos: int,
-  tag_stack: queue.Queue(rune)
+  tag_stack: queue.Queue(rune),
+  standalone_comment: bool
 }
 
 // All data provided will either be:
@@ -86,30 +91,75 @@ escape_html_string :: proc(s: string, allocator := context.allocator) -> (string
 }
 
 trim_decimal_string :: proc(s: string) -> string {
-	if len(s) == 0 || s[len(s)-1] != '0' {
-		return s
-	}
+  if len(s) == 0 || s[len(s)-1] != '0' {
+    return s
+  }
 
-	// We have at least one trailing zero. Search backwards and find the rest.
-	trailing_start_idx := len(s)-1
-	for i := len(s) - 2; i >= 0 ; i -= 1 {
-		switch s[i] {
-			case '0':
-				if trailing_start_idx == i + 1 {
-					trailing_start_idx = i
-				}
+  // We have at least one trailing zero. Search backwards and find the rest.
+  trailing_start_idx := len(s)-1
+  for i := len(s) - 2; i >= 0 ; i -= 1 {
+    switch s[i] {
+      case '0':
+        if trailing_start_idx == i + 1 {
+          trailing_start_idx = i
+        }
 
-			case '.':
-				if trailing_start_idx == i + 1 {
-					// Removes point completely for numbers like 0.000
-					trailing_start_idx = i
-				}
+      case '.':
+        if trailing_start_idx == i + 1 {
+          // Removes point completely for numbers like 0.000
+          trailing_start_idx = i
+        }
 
-				return s[:trailing_start_idx]
-		}
-	}
+        return s[:trailing_start_idx]
+    }
+  }
 
-	return s
+  return s
+}
+
+// Checks if a rune is plain whitespace.
+is_whitespace :: proc(r: rune) -> (res: bool) {
+  return r == ' '
+}
+
+// Trims all whitespace to the right of a string.
+trim_right_whitespace :: proc(s: string) -> (res: string) {
+  return strings.trim_right_proc(s, is_whitespace)
+}
+
+// Checks if a specific substring appears directly AFTER the provided
+// end point in a string.
+is_followed_by :: proc(s: string, search: string, end: int) -> (bool) {
+  offset := len(search)
+  if len(s) > end + offset {
+    searchable := s[:end+offset]
+    return strings.has_suffix(searchable, search) 
+  } else {
+    return false
+  }
+}
+
+// A standalone comment will be on a new line, separate
+// from any other content.
+is_standalone_comment :: proc(s: string) -> (bool) {
+  // If a .Comment is preceded by a .Text tag that is entirely
+  // madeup of whitespace, we consider it standalone.
+  if len(s) == strings.count(s, " ") {
+    return true
+  }
+
+  newline_index := strings.index_rune(s, '\n')
+  if newline_index == -1 {
+    return false
+  }
+
+  for i := newline_index+1; i < len(s); i += 1 {
+    if !strings.is_space(rune(s[i])) {
+      return false
+    }
+  }
+
+  return true
 }
 
 /*
@@ -118,19 +168,38 @@ trim_decimal_string :: proc(s: string) -> string {
 append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
   start_pos := lexer.last_token_start_pos
   end_pos := lexer.cursor
-  token_text: string
+  token_text := lexer.data[start_pos:end_pos]
 
   // Superfluous whitespace inside a tag should be ignored when
   // we access the data.
   #partial switch token_type {
+    // A text tag will be added as a Token without any modifications.
     case .Text:
       token_text = lexer.data[start_pos:end_pos]
-    case:
-      token_text, _ = strings.remove_all(lexer.data[start_pos:end_pos], " ")
+      if is_followed_by(lexer.data, COMMENT_OPEN, end_pos) && is_standalone_comment(token_text) {
+        lexer.standalone_comment = true
+        token_text = trim_right_whitespace(token_text)
+      }
+
+    // Remove all empty whitespace inside a valid tag so that we don't
+    // mess up our access of the data.
+    case .Tag, .TagLiteral, .TagLiteralTriple, .SectionOpen, .SectionClose:
+      token_text, _ = strings.remove_all(token_text, " ")
+
+    // Comment tags will not have their content output. Set to blank.
+    case .Comment:
+      token_text = ""
   }
 
+  // fmt.printf("Token '%v'\n", token_text)
+
   if start_pos != end_pos && len(token_text) > 0 {
-    token := Token{type=token_type, value=token_text, start_pos=start_pos, end_pos=end_pos}
+    token := Token{
+      type=token_type,
+      value=token_text,
+      start_pos=start_pos,
+      end_pos=end_pos
+    }
     append(&lexer.tokens, token)
   }
 }
@@ -143,11 +212,26 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
 */
 lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
   cur_type := lexer.cur_token_type
+
   if cur_type == .TagLiteralTriple || new_type == .TagLiteralTriple {
     lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
   } else {
     lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
   }
+
+  if cur_type == .Comment && lexer.standalone_comment {
+    chomping := true
+    for i := lexer.last_token_start_pos; i < len(lexer.data) && chomping; i += 1 {
+      if rune(lexer.data[i]) == '\n' || rune(lexer.data[i]) == '\r' {
+        lexer.last_token_start_pos += 1
+      } else {
+        chomping = false
+      }
+    }
+
+    lexer.standalone_comment = false
+  }
+
   lexer.cur_token_type = new_type
 }
 
@@ -230,6 +314,8 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
         lexer_update_token(lex, .SectionClose)
       case ch == LITERAL && lexer_peek_brace(lex) == TAG_START:
         lexer_update_token(lex, .TagLiteral)
+      case ch == COMMENT && lexer_peek_brace(lex) == TAG_START:
+        lexer_update_token(lex, .Comment)
     }
   }
 
@@ -262,8 +348,6 @@ data_extract :: proc(data: map[string]Data, token: Token, scope: ^queue.Queue(st
 
   for i in 0..<queue.len(scope^) {
     new_scope := cur_scope[queue.get(scope, i)]
-    fmt.println("cur_scope:", cur_scope)
-    fmt.println("new_scope key:", queue.get(scope, i))
     #partial switch _new_scope in new_scope {
       case map[string]Data:
         cur_scope = _new_scope
@@ -324,6 +408,8 @@ process_template :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
         queue.push_front(&q, token.value)
       case .SectionClose:
         queue.pop_front(&q)
+      case .Comment:
+        // Do nothing.
     }
   }
 
@@ -332,7 +418,6 @@ process_template :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
 }
 
 render :: proc(input: string, data: Data) -> (string, bool) {
-  fmt.println("DATA:", data)
   lexer := Lexer{data=input}
   defer queue.destroy(&lexer.tag_stack)
   defer delete(lexer.tokens)
@@ -341,8 +426,8 @@ render :: proc(input: string, data: Data) -> (string, bool) {
     return "", false
   }
 
-  fmt.printf("\n====== LEXING COMPLETED\n")
-  fmt.printf("%v\n\n", lexer.tokens)
+  fmt.println("TOKENS")
+  fmt.println(lexer.tokens)
 
   template := Template{lexer, data}
   return process_template(&template)
@@ -351,30 +436,9 @@ render :: proc(input: string, data: Data) -> (string, bool) {
 _main :: proc() -> (err: Error) {
   defer free_all(context.temp_allocator)
 
-  // input := "Hello, {{#person}}{{name}}{{/person}}, my name is {{name}} and {{{verb1}}} to {{verb2}}."
-  // data := map[string]Data {
-  //   "person" = map[string]Data {
-  //     "name" = "Ben"
-  //   },
-  //   "name" = "Jono",
-  //   "verb1" = "I like < >",
-  //   "verb2" = "juggle < >"
-  // }
-
-  input := "Hello, {{person.name}}."
-  data := map[string]Data {
-    "person" = map[string]Data {
-      "name" = "Ben"
-    },
-  }
-
-  // input := "Hello, {{{verb1}}}."
-  // data := map[string]Data {
-  //   "verb1" = "I like < >",
-  // }
-
-  // input := "Hello, {Mustache}!"
-  // data := ""
+  // input := "Begin.\n  {{! Comment Block! }}\nEnd.\n"
+  input := "  12 {{! 34 }}\n"
+  data := ""
 
   output, ok := render(input, data)
   if !ok {
@@ -382,8 +446,9 @@ _main :: proc() -> (err: Error) {
   }
 
   fmt.printf("====== RENDERING COMPLETED\n")
-  fmt.println("Input :", input)
-  fmt.println("Output:", output)
+  fmt.printf("Input : '%v'\n", input)
+  fmt.printf("Output: '%v'\n", output)
+  fmt.println("Match:", "  12 \n" == output)
   fmt.println("")
   return .None
 }
