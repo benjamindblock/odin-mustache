@@ -67,7 +67,7 @@ assert_mustache :: proc(t: ^testing.T,
                         data: Data,
                         exp_output: string,
                         loc := #caller_location) {
-  output, _ := process_template(input, data)
+  output, _ := render(input, data)
   testing.expect_value(t, output, exp_output, loc)
 }
 
@@ -91,10 +91,6 @@ test_interpolation :: proc(t: ^testing.T) {
   tests := root["tests"].(json.Array)
 
   for test, i in tests {
-    if i > 16 {
-      break
-    }
-
     test_obj := test.(json.Object)
     test_name := test_obj["name"].(string)
     test_desc := test_obj["desc"].(string)

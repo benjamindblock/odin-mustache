@@ -1,33 +1,20 @@
 package mustache
 
+import "core:container/queue"
 import "core:fmt"
 import "core:mem"
 import "core:os"
 import "core:strings"
 import "core:strconv"
 
-/*
-  A section is like:
-  {{#person}}
-    Hello!
-  {{/person}
-*/
-SECTION_OPEN :: "{{#"
-SECTION_TRIPLE_OPEN :: "{{{#"
-SECTION_CLOSE :: "{{/"
-SECTION_TRIPLE_CLOSE :: "{{{/"
-
-/*
-  Normal interpolation is like:
-  Hello, {{name}}!
-*/
-OTAG :: "{{"
-OTAG_TRIPLE :: "{{{"
-CTAG :: "}}"
-CTAG_TRIPLE :: "}}}"
-
 TAG_START :: '{'
 TAG_END :: '}'
+SECTION_START :: '#'
+SECTION_END :: '/'
+LITERAL :: '&'
+
+STANDARD_CLOSE :: "}}"
+LITERAL_CLOSE :: "}}}"
 
 /*
   Special characters that will receive HTML-escaping
@@ -43,6 +30,34 @@ Error :: enum {
   Something
 }
 
+TokenType :: enum {
+	Text,
+	Tag,
+	TagLiteral,
+	TagLiteralTriple,
+	SectionOpen,
+	SectionClose,
+	EOF // The last token parsed, caller should not call again.
+}
+
+// TODO: Just store the beginning/end position of the string
+// rather than the entire string as the value...
+Token :: struct {
+	type: TokenType,
+	value: string,
+  start_pos: int,
+  end_pos: int
+}
+
+Lexer :: struct {
+  data: string,
+  cursor: int,
+  tokens: [dynamic]Token,
+  cur_token_type: TokenType,
+  last_token_start_pos: int,
+  tag_stack: queue.Queue(rune)
+}
+
 // All data provided will either be:
 // 1. A string
 // 2. A mapping from string => string
@@ -53,205 +68,21 @@ Data :: union {
   string
 }
 
-/*
-
-*/
 Template :: struct {
-  // Raw input string.
-  str: string,
-  // Points to the current position in str when parsing.
-  pos: int,
-  tags: [dynamic]Tag,
+  lexer: Lexer,
   data: Data
 }
 
-Tag :: union {
-  TextTag,
-  DataTag,
-  SectionTag
-}
+escape_html_string :: proc(s: string, allocator := context.allocator) -> (string) {
+  context.allocator = allocator
 
-TextTag :: struct {
-  str: string
-}
-
-DataTag :: struct {
-  key: string,
-  escape: bool
-}
-
-SectionTag :: struct {
-  scope: string
-}
-
-active_str :: proc(tmpl: ^Template) -> (string) {
-  str_len := len(tmpl.str)
-  if tmpl.pos >= str_len {
-    return ""
-  }
-
-  return strings.cut(tmpl.str, tmpl.pos, str_len, context.temp_allocator)
-}
-
-parse :: proc() {
-  brace_depth: int
-  tags: queue.Queue(rune)
-
-  opening_tag: bool
-  closing_tag: bool
-  inside_tag: bool
-  in_section: bool
-  in_literal: bool
-
-  for ch in str {
-    switch {
-      case ch == TAG_START:
-        queue.push_front(&tags, ch)
-        in_tag = true
-        brace_depth += 1
-      case ch == TAG_END:
-        in_tag = false
-        pop := queue.pop_front(&tags)
-        if queue.len(tags) == 0 {
-          brace_depth = 0
-        }
-      case ch == '#' && queue.peek_front(&tags) == TAG_START:
-        in_section = true
-      case ch == '&' && queue.peek_front(&tags) == TAG_START:
-        in_literal = true
-        
-    }
-  }
-}
-
-/*
-
-*/
-parse_string :: proc(tmpl: ^Template) -> (ok: bool) {
-  str := active_str(tmpl)
-
-  otag_triple_section := strings.index(str, SECTION_TRIPLE_OPEN)
-  otag_triple_pos := strings.index(str, OTAG_TRIPLE)  
-  otag_section := strings.index(str, SECTION_OPEN)  
-  otag_pos := strings.index(str, OTAG)  
-
-  if otag_triple_section > -1 {
-    // TODO: Add triple section parsing.
-  } else if otag_triple_pos > -1 {
-    ok = parse_triple_tag(tmpl)
-  } else if otag_section > -1 {
-    // TODO: Add normal section parsing.
-    ok = parse_section(tmpl)
-  } else if otag_pos > -1 {
-    ok = parse_standard_tag(tmpl)
-  } else {
-    // If we did not find an open tag, set our pointer to the
-    // end of the string, add the remaining text as a TextTag,
-    // and return.
-    tmpl.pos = len(tmpl.str)
-    append(&tmpl.tags, TextTag{str})
-    ok = true
-  }
-
-  return ok
-}
-
-parse_standard_tag :: proc(tmpl: ^Template) -> (bool) {
-  str := active_str(tmpl)
-  otag_pos := strings.index(str, OTAG)  
-
-  tag_content_start_pos := otag_pos + len(OTAG)
-
-  // Text to seek for the closing tag is from the start
-  // of the tag content until the end of the string.
-  seek := strings.cut(str, tag_content_start_pos, allocator=context.temp_allocator)
-
-  ctag_pos := strings.index(seek, CTAG)
-
-  // If we could not find a matching closing tag, return
-  // with a failure signal.
-  if ctag_pos == -1 {
-    fmt.println("No matching closing tag found from position:", tmpl.pos)
-    return false
-  }
-
-  // Now that we know we have a valid chunk of text with a
-  // tag inside of it, store all the text leading up to the
-  // opening tag as "preceding" and put it inside a TextTag.
-  // tmpl.pos is always ABSOLUTE position.
-  preceding := strings.cut(tmpl.str, tmpl.pos, otag_pos, context.temp_allocator)
-  append(&tmpl.tags, TextTag{preceding})
-
-  // Get the data_id (eg., the content inside the tag) and
-  // store it as a DataTag.
-  data_id := strings.cut(str, tag_content_start_pos, ctag_pos, context.temp_allocator)
-  append(&tmpl.tags, DataTag{key=data_id, escape=true})
-
-  // Increment our position cursor (this is ABSOLUTE position).
-  tmpl.pos = tmpl.pos + tag_content_start_pos + ctag_pos + len(CTAG)
-
-  return true
-}
-
-// TODO: Fill in.
-// input := "Hello, {{#person}}{{name}}{{/person}}"
-parse_section :: proc(tmpl: ^Template) -> (bool) {
-  str := active_str(tmpl)
-  otag_pos := strings.index(str, SECTION_OPEN)  
-  section_start_content_start_pos := otag_pos + len(SECTION_OPEN)
-
-  // Text to seek for the closing tag is from the start
-  // of the tag content until the end of the string.
-  seek := strings.cut(str, section_start_content_start_pos, allocator=context.temp_allocator)
-  ctag_pos := strings.index(seek, CTAG)
-  if ctag_pos == -1 {
-    fmt.println("No matching closing tag found from position:", tmpl.pos)
-    return false
-  }
-
-  // Now that we know we have a valid chunk of text with a
-  // tag inside of it, store all the text leading up to the
-  // opening tag as "preceding" and put it inside a TextTag.
-  // tmpl.pos is always ABSOLUTE position.
-  preceding := strings.cut(tmpl.str, tmpl.pos, otag_pos, context.temp_allocator)
-  append(&tmpl.tags, TextTag{preceding})
-
-  // Get the data_id (eg., the content inside the tag) and
-  // store it as a DataTag.
-  data_id := strings.cut(str, section_start_content_start_pos, ctag_pos, context.temp_allocator)
-  append(&tmpl.tags, SectionTag{scope=data_id})
-
-  // Increment our position cursor (this is ABSOLUTE position).
-  tmpl.pos = tmpl.pos + section_start_content_start_pos + ctag_pos + len(CTAG)
-
-  tmpl.pos = len(tmpl.str)
-  return true
-}
-
-parse_triple_tag :: proc(tmpl: ^Template) -> (bool) {
-  str := active_str(tmpl)
-
-  otag_pos := strings.index(str, OTAG_TRIPLE)  
-  tag_content_start_pos := otag_pos + len(OTAG_TRIPLE)
-
-  seek_for_ctag := strings.cut(str, tag_content_start_pos, allocator=context.temp_allocator)
-  ctag_pos := strings.index(seek_for_ctag, CTAG_TRIPLE)
-  if ctag_pos == -1 {
-    fmt.println("No triple closing tag found from position:", tmpl.pos)
-    return false
-  }
-
-  before_tag := strings.cut(tmpl.str, tmpl.pos, otag_pos, context.temp_allocator)
-  append(&tmpl.tags, TextTag{before_tag})
-
-  data_id := strings.cut(str, tag_content_start_pos, ctag_pos, context.temp_allocator)
-  append(&tmpl.tags, DataTag{key=data_id, escape=false})
-
-  // Increment our position cursor (this is ABSOLUTE position) to
-  // the character after the closing tag.
-  tmpl.pos = tmpl.pos + tag_content_start_pos + ctag_pos + len(CTAG_TRIPLE)
-
-  return true
+  escaped := s
+  // Ampersand escaping goes first.
+  escaped, _ = strings.replace_all(escaped, "&", HTML_AMPERSAND)
+  escaped, _ = strings.replace_all(escaped, "<", HTML_LESS_THAN)
+  escaped, _ = strings.replace_all(escaped, ">", HTML_GREATER_THAN)
+  escaped, _ = strings.replace_all(escaped, "\"", HTML_QUOTE)
+  return escaped
 }
 
 trim_decimal_string :: proc(s: string) -> string {
@@ -281,144 +112,280 @@ trim_decimal_string :: proc(s: string) -> string {
 	return s
 }
 
-extract_data :: proc(data: map[string]Data, tag: DataTag) -> (string) {
-  output: string
-  key := tag.key
-  escape_html := tag.escape
+/*
+  Adds a new token to our list.
+*/
+append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
+  start_pos := lexer.last_token_start_pos
+  end_pos := lexer.cursor
+  token_text: string
 
-  // Key prefixed with "&" should be like a triple tag.
-  if strings.has_prefix(key, "&") {
-    key = strings.trim_prefix(key, "&")
-    escape_html = false
+  // Superfluous whitespace inside a tag should be ignored when
+  // we access the data.
+  #partial switch token_type {
+    case .Text:
+      token_text = lexer.data[start_pos:end_pos]
+    case:
+      token_text, _ = strings.remove_all(lexer.data[start_pos:end_pos], " ")
   }
 
-  dotted_keys := strings.split(key, ".", allocator=context.temp_allocator)
-  fmt.println(dotted_keys)
+  if start_pos != end_pos && len(token_text) > 0 {
+    token := Token{type=token_type, value=token_text, start_pos=start_pos, end_pos=end_pos}
+    append(&lexer.tokens, token)
+  }
+}
 
-  data, ok := data[key]
+/*
+  Used AFTER a new Token is inserted into the tokens dynamic
+  array. In the case of a .TagLiteral ('{{{...}}}'), we need
+  to advance the next start position by three instead of two,
+  to account for the additional brace.
+*/
+lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
+  cur_type := lexer.cur_token_type
+  if cur_type == .TagLiteralTriple || new_type == .TagLiteralTriple {
+    lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
+  } else {
+    lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
+  }
+  lexer.cur_token_type = new_type
+}
+
+/*
+  Used when we move from a standard .Tag to a more special kind
+  (.TagLiteral, .SectionOpen, .SectionClose). We need to update
+  the current type tracked by lexer, and increase the content
+  start position by one to account for the additional token.
+*/
+lexer_update_token :: proc(lexer: ^Lexer, new_type: TokenType) {
+  lexer.last_token_start_pos += 1
+  lexer.cur_token_type = new_type
+}
+
+lexer_push_brace :: proc(lexer: ^Lexer, brace: rune) {
+  queue.push_front(&lexer.tag_stack, brace)
+}
+
+lexer_peek_brace :: proc(lexer: ^Lexer) -> (rune) {
+  if queue.len(lexer.tag_stack) == 0 {
+    return 0
+  } else {
+    return queue.peek_front(&lexer.tag_stack)^
+  }
+}
+
+lexer_pop_brace :: proc(lexer: ^Lexer) {
+  queue.pop_front_safe(&lexer.tag_stack)
+}
+
+lexer_tag_stack_len :: proc(lexer: ^Lexer) -> (int) {
+  return queue.len(lexer.tag_stack)
+}
+
+lexer_peek :: proc(lexer: ^Lexer, forward := 1) -> (rune) {
+  peek_i := lexer.cursor + forward
+  peeked := rune(lexer.data[peek_i])
+  return peeked
+}
+
+parse :: proc(lex: ^Lexer) -> (ok: bool) {
+  for ch, i in lex.data {
+    lex.cursor = i
+
+    switch {
+      case ch == TAG_START:
+        lexer_push_brace(lex, ch)
+      case ch == TAG_END:
+        lexer_pop_brace(lex)
+    }
+
+    switch {
+      case ch == TAG_START && lexer_peek(lex) == TAG_START && lexer_peek(lex, 2) == TAG_START:
+        // If we were processing text and hit an opening brace '{',
+        // then create that text token and flag that we are heading
+        // inside a brace now.
+        if lex.cur_token_type == .Text {
+          append_token(lex, TokenType.Text)
+          lexer_reset_token(lex, .TagLiteralTriple)
+        }
+      case ch == TAG_START && lexer_peek(lex) == TAG_START:
+        // If we were processing text and hit an opening brace '{',
+        // then create that text token and flag that we are heading
+        // inside a brace now.
+        if lex.cur_token_type == .Text {
+          append_token(lex, TokenType.Text)
+          lexer_reset_token(lex, .Tag)
+        }
+      case ch == TAG_END:
+        // If we hit the end of a tag and are not in a text tag,
+        // create a new tag. If in text and we came across a random
+        // '}' rune, don't do anything.
+        if lexer_tag_stack_len(lex) > 0 && lex.cur_token_type != .Text {
+          append_token(lex, lex.cur_token_type)
+          lexer_reset_token(lex, .Text)
+        }
+      case ch == SECTION_START && lexer_peek_brace(lex) == TAG_START:
+        lexer_update_token(lex, .SectionOpen)
+      case ch == SECTION_END && lexer_peek_brace(lex) == TAG_START:
+        lexer_update_token(lex, .SectionClose)
+      case ch == LITERAL && lexer_peek_brace(lex) == TAG_START:
+        lexer_update_token(lex, .TagLiteral)
+    }
+  }
+
+  if lexer_tag_stack_len(lex) > 0 {
+    // Fail out if we have unbalanced braces for tags.
+    fmt.println("Unbalanced braces detected.")
+    return false
+  } else {
+    // Add the last tag.
+    lex.cursor += 1
+    append_token(lex, lex.cur_token_type)
+    lex.cur_token_type = .EOF
+    return true
+  }
+}
+
+data_extract :: proc(data: map[string]Data, token: Token, scope: ^queue.Queue(string), escape_html: bool) -> (string) {
+  cur_scope := data
+  output: string
+  key := token.value
+
+  dotted_keys := strings.split(key, ".", allocator=context.temp_allocator)
+  if len(dotted_keys) > 1 {
+    for i in 0..<(len(dotted_keys) - 1) {
+      queue.push_back(scope, dotted_keys[i])
+    }
+
+    key = dotted_keys[len(dotted_keys) - 1]
+  }
+
+  for i in 0..<queue.len(scope^) {
+    new_scope := cur_scope[queue.get(scope, i)]
+    fmt.println("cur_scope:", cur_scope)
+    fmt.println("new_scope key:", queue.get(scope, i))
+    #partial switch _new_scope in new_scope {
+      case map[string]Data:
+        cur_scope = _new_scope
+    }
+  }
+
+  text, ok := cur_scope[key]
   if !ok {
-    fmt.println("Could not find", key, "in", data)
+    fmt.println("Could not find", key, "in", cur_scope)
     output = ""
   } else {
-    output = data.(string)
+    output = text.(string)
   }
 
   if escape_html {
     output = escape_html_string(output)
   }
 
+  // Return the scope stack to its rightful place after parsing
+  // out the dot-notation keys and adding to the scope.
+  for i in 0..<(len(dotted_keys) - 1) {
+    queue.pop_front(scope)
+  }
+
   return output
 }
 
-/*
-  Renders a template by walking through each Tag and
-  turning it into a string. At the end, the list of
-  strings that we have built up is concatenated.
-*/
-render_template :: proc(tmpl: Template) -> (string, bool) {
-  strs: [dynamic]string
+process_template :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
+  str: [dynamic]string
+  q: queue.Queue(string)
 
-  fmt.println(tmpl.tags)
-
-  for _tag in tmpl.tags {
-    #partial switch tag in _tag {
-      case TextTag:
-        append(&strs, tag.str)
-      // TODO: Does not handle nested keys.
-      // TODO: Does not handle arrays.
-      case DataTag:
+  for token in tmpl.lexer.tokens {
+    #partial switch token.type {
+      case .Text:
+        append(&str, token.value)
+      case .Tag:
         switch data in tmpl.data {
           case string:
-            append(&strs, data)
+            append(&str, escape_html_string(data))
           case map[string]Data:
-            str := extract_data(data, tag)
-            append(&strs, str)
+            append(&str, data_extract(data, token, &q, true))
         }
+      case .TagLiteral:
+        switch data in tmpl.data {
+          case string:
+            append(&str, data)
+          case map[string]Data:
+            append(&str, data_extract(data, token, &q, false))
+        }
+      case .TagLiteralTriple:
+        switch data in tmpl.data {
+          case string:
+            append(&str, data)
+          case map[string]Data:
+            append(&str, data_extract(data, token, &q, false))
+        }
+      case .SectionOpen:
+        queue.push_front(&q, token.value)
+      case .SectionClose:
+        queue.pop_front(&q)
     }
   }
 
-  rendered := strings.concatenate(
-    strs[:],
-    allocator=context.temp_allocator
-  )
-  delete(strs)
-
-  fmt.println("Rendered:", rendered)
-  return rendered, true
-}
-
-escape_html_string :: proc(s: string, allocator := context.allocator) -> (string) {
-  context.allocator = allocator
-
-  escaped := s
-  // Ampersand escaping goes first.
-  escaped, _ = strings.replace_all(escaped, "&", HTML_AMPERSAND)
-  escaped, _ = strings.replace_all(escaped, "<", HTML_LESS_THAN)
-  escaped, _ = strings.replace_all(escaped, ">", HTML_GREATER_THAN)
-  escaped, _ = strings.replace_all(escaped, "\"", HTML_QUOTE)
-  return escaped
-}
-
-/*
-  Processes a Mustache template by:
-  1. Parsing the string into a Template
-  2. Rendering the Template with the provided Data.
-*/
-process_template :: proc(str: string, data: Data) -> (string, bool) {
-  ok: bool
-  output: string
-  tmpl := &Template{
-    str=str,
-    pos=0,
-    tags=make([dynamic]Tag),
-    data=data
-  }
-  defer delete(tmpl.tags)
-
-  when ODIN_DEBUG && !ODIN_TEST {
-    fmt.printf("\n====== STARTING MUSTACHE PROCESS\n")
-    fmt.printf("%v\n", tmpl)
-  }
-
-  for tmpl.pos < len(tmpl.str) {
-    ok = parse_string(tmpl)
-    if !ok {
-      fmt.println("Could not parse.")
-      return "", false
-    }
-
-    when ODIN_DEBUG && !ODIN_TEST {
-      fmt.println("\n====== AFTER parse_string(...)")
-      fmt.println(tmpl)
-    }
-  }
-
-  output, ok = render_template(tmpl^)
-  if !ok {
-    fmt.println("Could not render.")
-    return "", false
-  }
-
+  output = strings.concatenate(str[:])
   return output, true
 }
 
-_main :: proc() -> (err: Error) {
-  input := "Hello, {{#person}}{{name}}{{/person}}"
-  data: map[string]Data
-  defer delete(data)
-  data["person"] = map[string]Data {
-    "name" = "ben"
+render :: proc(input: string, data: Data) -> (string, bool) {
+  fmt.println("DATA:", data)
+  lexer := Lexer{data=input}
+  defer queue.destroy(&lexer.tag_stack)
+  defer delete(lexer.tokens)
+
+  if !parse(&lexer) {
+    return "", false
   }
 
-  output, ok := process_template(input, data)
+  fmt.printf("\n====== LEXING COMPLETED\n")
+  fmt.printf("%v\n\n", lexer.tokens)
+
+  template := Template{lexer, data}
+  return process_template(&template)
+}
+
+_main :: proc() -> (err: Error) {
   defer free_all(context.temp_allocator)
+
+  // input := "Hello, {{#person}}{{name}}{{/person}}, my name is {{name}} and {{{verb1}}} to {{verb2}}."
+  // data := map[string]Data {
+  //   "person" = map[string]Data {
+  //     "name" = "Ben"
+  //   },
+  //   "name" = "Jono",
+  //   "verb1" = "I like < >",
+  //   "verb2" = "juggle < >"
+  // }
+
+  input := "Hello, {{person.name}}."
+  data := map[string]Data {
+    "person" = map[string]Data {
+      "name" = "Ben"
+    },
+  }
+
+  // input := "Hello, {{{verb1}}}."
+  // data := map[string]Data {
+  //   "verb1" = "I like < >",
+  // }
+
+  // input := "Hello, {Mustache}!"
+  // data := ""
+
+  output, ok := render(input, data)
   if !ok {
     return .Something
   }
 
-  fmt.printf("\n====== MUSTACHE COMPLETED\n")
-  fmt.printf("%v\n\n", output)
-  return
+  fmt.printf("====== RENDERING COMPLETED\n")
+  fmt.println("Input :", input)
+  fmt.println("Output:", output)
+  fmt.println("")
+  return .None
 }
 
 main :: proc() {
