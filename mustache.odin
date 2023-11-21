@@ -26,6 +26,9 @@ OTAG_TRIPLE :: "{{{"
 CTAG :: "}}"
 CTAG_TRIPLE :: "}}}"
 
+TAG_START :: '{'
+TAG_END :: '}'
+
 /*
   Special characters that will receive HTML-escaping
   treatment, if necessary.
@@ -64,7 +67,8 @@ Template :: struct {
 
 Tag :: union {
   TextTag,
-  DataTag
+  DataTag,
+  SectionTag
 }
 
 TextTag :: struct {
@@ -76,6 +80,10 @@ DataTag :: struct {
   escape: bool
 }
 
+SectionTag :: struct {
+  scope: string
+}
+
 active_str :: proc(tmpl: ^Template) -> (string) {
   str_len := len(tmpl.str)
   if tmpl.pos >= str_len {
@@ -83,6 +91,37 @@ active_str :: proc(tmpl: ^Template) -> (string) {
   }
 
   return strings.cut(tmpl.str, tmpl.pos, str_len, context.temp_allocator)
+}
+
+parse :: proc() {
+  brace_depth: int
+  tags: queue.Queue(rune)
+
+  opening_tag: bool
+  closing_tag: bool
+  inside_tag: bool
+  in_section: bool
+  in_literal: bool
+
+  for ch in str {
+    switch {
+      case ch == TAG_START:
+        queue.push_front(&tags, ch)
+        in_tag = true
+        brace_depth += 1
+      case ch == TAG_END:
+        in_tag = false
+        pop := queue.pop_front(&tags)
+        if queue.len(tags) == 0 {
+          brace_depth = 0
+        }
+      case ch == '#' && queue.peek_front(&tags) == TAG_START:
+        in_section = true
+      case ch == '&' && queue.peek_front(&tags) == TAG_START:
+        in_literal = true
+        
+    }
+  }
 }
 
 /*
@@ -157,6 +196,34 @@ parse_standard_tag :: proc(tmpl: ^Template) -> (bool) {
 // TODO: Fill in.
 // input := "Hello, {{#person}}{{name}}{{/person}}"
 parse_section :: proc(tmpl: ^Template) -> (bool) {
+  str := active_str(tmpl)
+  otag_pos := strings.index(str, SECTION_OPEN)  
+  section_start_content_start_pos := otag_pos + len(SECTION_OPEN)
+
+  // Text to seek for the closing tag is from the start
+  // of the tag content until the end of the string.
+  seek := strings.cut(str, section_start_content_start_pos, allocator=context.temp_allocator)
+  ctag_pos := strings.index(seek, CTAG)
+  if ctag_pos == -1 {
+    fmt.println("No matching closing tag found from position:", tmpl.pos)
+    return false
+  }
+
+  // Now that we know we have a valid chunk of text with a
+  // tag inside of it, store all the text leading up to the
+  // opening tag as "preceding" and put it inside a TextTag.
+  // tmpl.pos is always ABSOLUTE position.
+  preceding := strings.cut(tmpl.str, tmpl.pos, otag_pos, context.temp_allocator)
+  append(&tmpl.tags, TextTag{preceding})
+
+  // Get the data_id (eg., the content inside the tag) and
+  // store it as a DataTag.
+  data_id := strings.cut(str, section_start_content_start_pos, ctag_pos, context.temp_allocator)
+  append(&tmpl.tags, SectionTag{scope=data_id})
+
+  // Increment our position cursor (this is ABSOLUTE position).
+  tmpl.pos = tmpl.pos + section_start_content_start_pos + ctag_pos + len(CTAG)
+
   tmpl.pos = len(tmpl.str)
   return true
 }
@@ -254,7 +321,7 @@ render_template :: proc(tmpl: Template) -> (string, bool) {
   fmt.println(tmpl.tags)
 
   for _tag in tmpl.tags {
-    switch tag in _tag {
+    #partial switch tag in _tag {
       case TextTag:
         append(&strs, tag.str)
       // TODO: Does not handle nested keys.

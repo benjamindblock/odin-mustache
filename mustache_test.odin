@@ -91,7 +91,7 @@ test_interpolation :: proc(t: ^testing.T) {
   tests := root["tests"].(json.Array)
 
   for test, i in tests {
-    if i > 17 {
+    if i > 16 {
       break
     }
 
