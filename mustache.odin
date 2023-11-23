@@ -68,14 +68,21 @@ Lexer :: struct {
 // 2. A mapping from string => string
 // 3. A mapping from string => more Data
 // 4. An array of Data?
+Map :: distinct map[string]Data
 Data :: union {
-  map[string]Data,
+  Map,
   string
 }
 
 Template :: struct {
   lexer: Lexer,
-  data: Data
+  data: Data,
+  context_stack: [dynamic]ContextStackEntry
+}
+
+ContextStackEntry :: struct {
+  data: Data,
+  label: string
 }
 
 escape_html_string :: proc(s: string, allocator := context.allocator) -> (string) {
@@ -88,6 +95,28 @@ escape_html_string :: proc(s: string, allocator := context.allocator) -> (string
   escaped, _ = strings.replace_all(escaped, ">", HTML_GREATER_THAN)
   escaped, _ = strings.replace_all(escaped, "\"", HTML_QUOTE)
   return escaped
+}
+
+/*
+  Digs data from a Data map, given a list of keys.
+*/
+data_dig :: proc(data: Data, keys: []string) -> (Data) {
+  data := data
+
+  if len(keys) == 0 {
+    return data
+  }
+
+  for k in keys {
+    switch _data in data {
+      case string:
+        return _data
+      case Map:
+        data = _data[k]
+    }
+  }
+
+  return data
 }
 
 trim_decimal_string :: proc(s: string) -> string {
@@ -332,54 +361,112 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
   }
 }
 
-data_extract :: proc(data: map[string]Data, token: Token, scope: ^queue.Queue(string), escape_html: bool) -> (string) {
-  cur_scope := data
-  output: string
-  key := token.value
+// Returns true if is an ASCII space character ('\t', '\n', '\v', '\f', '\r', ' ')
+@(private) _invalid_scope := map[string]bool{
+  "false" = true,
+  "null" = true,
+  "" = true
+}
 
-  dotted_keys := strings.split(key, ".", allocator=context.temp_allocator)
-  if len(dotted_keys) > 1 {
-    for i in 0..<(len(dotted_keys) - 1) {
-      queue.push_back(scope, dotted_keys[i])
-    }
+/*
+  Sections can have false-y values in their corresponding data. When this
+  is the case, the section should not be rendered. Example:
 
-    key = dotted_keys[len(dotted_keys) - 1]
+  input := "\"{{#boolean}}This should not be rendered.{{/boolean}}\""
+  data := Map {
+    "boolean" = "false"
   }
 
-  for i in 0..<queue.len(scope^) {
-    new_scope := cur_scope[queue.get(scope, i)]
-    #partial switch _new_scope in new_scope {
-      case map[string]Data:
-        cur_scope = _new_scope
+  Output should be ""
+*/
+template_valid_scope :: proc(tmpl: ^Template, token: Token) -> (bool) {
+  // The root stack is always valid.
+  current_stack := tmpl.context_stack[0]
+  if current_stack.label == "ROOT" {
+    return true
+  }
+
+  // .SectionClose and .Comment tokens have no impact on our
+  // output, so they always are true.
+  #partial switch token.type {
+    case .SectionClose:
+      return true
+    case .Comment:
+      return true
+  }
+
+  // A mapping is a valid top scope, as well as any string
+  // NOT in the _invalid_scope mapping.
+  switch _data in current_stack.data {
+    case Map:
+      return true
+    case string:
+      return !_invalid_scope[_data]
+  }
+
+  return false
+}
+
+template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool) -> (string) {
+  ids := strings.split(token.value, ".", allocator=context.temp_allocator)
+
+  b := false
+  resolved: Data
+
+  for c in tmpl.context_stack {
+    resolved = data_dig(c.data, ids[0:1])
+    if resolved != nil {
+      break
     }
   }
 
-  text, ok := cur_scope[key]
+  if len(ids[1:]) > 0 {
+    resolved = data_dig(resolved, ids[1:])
+  }
+
+  str, ok := resolved.(string)
   if !ok {
-    fmt.println("Could not find", key, "in", cur_scope)
-    output = ""
-  } else {
-    output = text.(string)
+    fmt.println("COULD NOT RESOLVE TO A STRING")
+    return ""
   }
 
   if escape_html {
-    output = escape_html_string(output)
+    str = escape_html_string(str)
   }
 
-  // Return the scope stack to its rightful place after parsing
-  // out the dot-notation keys and adding to the scope.
-  for i in 0..<(len(dotted_keys) - 1) {
-    queue.pop_front(scope)
-  }
-
-  return output
+  return str
 }
 
-process_template :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
+template_print_stack :: proc(tmpl: ^Template) {
+  fmt.println("Current stack")
+  for c, i in tmpl.context_stack {
+    fmt.printf("\t[%v] %v: %v\n", i, c.label, c.data)
+  }
+}
+
+template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string) {
+  ids := strings.split(data_id, ".", allocator=context.temp_allocator)
+  // New stack entries always need to resolve against the current top
+  // of the stack entry.
+  to_add := data_dig(tmpl.context_stack[0].data, ids)
+  stack_entry := ContextStackEntry{data=to_add, label=data_id}
+  inject_at(&tmpl.context_stack, 0, stack_entry)
+}
+
+template_pop_from_context_stack :: proc(tmpl: ^Template) {
+  ordered_remove(&tmpl.context_stack, 0)
+}
+
+template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   str: [dynamic]string
-  q: queue.Queue(string)
+  root := ContextStackEntry{data=tmpl.data, label="ROOT"}
+  inject_at(&tmpl.context_stack, 0, root)
 
   for token in tmpl.lexer.tokens {
+    if !template_valid_scope(tmpl, token) {
+      continue
+    }
+
     #partial switch token.type {
       case .Text:
         append(&str, token.value)
@@ -387,27 +474,27 @@ process_template :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
         switch data in tmpl.data {
           case string:
             append(&str, escape_html_string(data))
-          case map[string]Data:
-            append(&str, data_extract(data, token, &q, true))
+          case Map:
+            append(&str, template_stack_extract(tmpl, token, true))
         }
       case .TagLiteral:
         switch data in tmpl.data {
           case string:
             append(&str, data)
-          case map[string]Data:
-            append(&str, data_extract(data, token, &q, false))
+          case Map:
+            append(&str, template_stack_extract(tmpl, token, false))
         }
       case .TagLiteralTriple:
         switch data in tmpl.data {
           case string:
             append(&str, data)
-          case map[string]Data:
-            append(&str, data_extract(data, token, &q, false))
+          case Map:
+            append(&str, template_stack_extract(tmpl, token, false))
         }
       case .SectionOpen:
-        queue.push_front(&q, token.value)
+        template_add_to_context_stack(tmpl, token.value)
       case .SectionClose:
-        queue.pop_front(&q)
+        template_pop_from_context_stack(tmpl)
       case .Comment:
         // Do nothing.
     }
@@ -426,30 +513,35 @@ render :: proc(input: string, data: Data) -> (string, bool) {
     return "", false
   }
 
-  fmt.println("TOKENS")
-  fmt.println(lexer.tokens)
-
-  template := Template{lexer, data}
-  return process_template(&template)
+  template := Template{lexer=lexer, data=data}
+  return template_process(&template)
 }
 
 _main :: proc() -> (err: Error) {
   defer free_all(context.temp_allocator)
 
-  // input := "Begin.\n  {{! Comment Block! }}\nEnd.\n"
-  input := "  12 {{! 34 }}\n"
-  data := ""
+  input := "\"{{#sec}}{{a}}, {{b}}, {{c.d}}{{/sec}}\""
+  data := Map {
+    "a" = "foo",
+    "b" = "wrong",
+    "sec" = Map {
+      "b" = "bar"
+    },
+    "c" = Map {
+      "d" = "baz"
+    }
+  }
 
+  fmt.printf("====== RENDERING STARTED\n")
+  fmt.printf("Input : '%v'\n", input)
   output, ok := render(input, data)
   if !ok {
     return .Something
   }
-
   fmt.printf("====== RENDERING COMPLETED\n")
-  fmt.printf("Input : '%v'\n", input)
   fmt.printf("Output: '%v'\n", output)
-  fmt.println("Match:", "  12 \n" == output)
   fmt.println("")
+
   return .None
 }
 
