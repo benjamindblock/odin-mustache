@@ -1,12 +1,13 @@
 package mustache
 
-import "core:container/queue"
 import "core:fmt"
 import "core:mem"
 import "core:os"
 import "core:strings"
-import "core:strconv"
 
+/*
+  Mustache characters.
+*/
 TAG_START :: '{'
 TAG_END :: '}'
 SECTION_START :: '#'
@@ -14,6 +15,10 @@ SECTION_END :: '/'
 LITERAL :: '&'
 COMMENT :: '!'
 
+/*
+  Mustache tag descriptions needed for lexing.
+*/
+STANDARD_OPEN :: "{{"
 STANDARD_CLOSE :: "}}"
 LITERAL_CLOSE :: "}}}"
 COMMENT_OPEN :: "{{!"
@@ -59,7 +64,7 @@ Lexer :: struct {
   tokens: [dynamic]Token,
   cur_token_type: TokenType,
   last_token_start_pos: int,
-  tag_stack: queue.Queue(rune),
+  tag_stack: [dynamic]rune,
   standalone_comment: bool
 }
 
@@ -276,23 +281,23 @@ lexer_update_token :: proc(lexer: ^Lexer, new_type: TokenType) {
 }
 
 lexer_push_brace :: proc(lexer: ^Lexer, brace: rune) {
-  queue.push_front(&lexer.tag_stack, brace)
+  inject_at(&lexer.tag_stack, 0, brace)
 }
 
 lexer_peek_brace :: proc(lexer: ^Lexer) -> (rune) {
-  if queue.len(lexer.tag_stack) == 0 {
+  if len(lexer.tag_stack) == 0 {
     return 0
   } else {
-    return queue.peek_front(&lexer.tag_stack)^
+    return lexer.tag_stack[0]
   }
 }
 
 lexer_pop_brace :: proc(lexer: ^Lexer) {
-  queue.pop_front_safe(&lexer.tag_stack)
+  ordered_remove(&lexer.tag_stack, 0)
 }
 
 lexer_tag_stack_len :: proc(lexer: ^Lexer) -> (int) {
-  return queue.len(lexer.tag_stack)
+  return len(lexer.tag_stack)
 }
 
 lexer_peek :: proc(lexer: ^Lexer, forward := 1) -> (rune) {
@@ -506,7 +511,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
 
 render :: proc(input: string, data: Data) -> (string, bool) {
   lexer := Lexer{data=input}
-  defer queue.destroy(&lexer.tag_stack)
+  defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
 
   if !parse(&lexer) {
