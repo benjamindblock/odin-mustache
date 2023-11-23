@@ -366,8 +366,11 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
   }
 }
 
-// Returns true if is an ASCII space character ('\t', '\n', '\v', '\f', '\r', ' ')
-@(private) _invalid_scope := map[string]bool{
+/*
+  Returns true if the value is one of the "falsey" values
+  for a context.
+*/
+@(private) _falsey_context := map[string]bool{
   "false" = true,
   "null" = true,
   "" = true
@@ -382,17 +385,19 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
     "boolean" = "false"
   }
 
-  Output should be ""
+  A Map is a valid top context, as well as any string NOT in the
+  _falsey_context mapping.
+
+  .SectionClose and .Comment tokens have no impact on our output, so they
+  always are true.
 */
-template_valid_scope :: proc(tmpl: ^Template, token: Token) -> (bool) {
+token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool) {
   // The root stack is always valid.
   current_stack := tmpl.context_stack[0]
   if current_stack.label == "ROOT" {
     return true
   }
 
-  // .SectionClose and .Comment tokens have no impact on our
-  // output, so they always are true.
   #partial switch token.type {
     case .SectionClose:
       return true
@@ -400,35 +405,38 @@ template_valid_scope :: proc(tmpl: ^Template, token: Token) -> (bool) {
       return true
   }
 
-  // A mapping is a valid top scope, as well as any string
-  // NOT in the _invalid_scope mapping.
   switch _data in current_stack.data {
     case Map:
       return true
     case string:
-      return !_invalid_scope[_data]
+      return !_falsey_context[_data]
   }
 
   return false
 }
 
+/*
+  TODO: Update return value to (string, bool) and add an appropriate
+        error and message during the string confirmation phase.
+*/
 template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool) -> (string) {
   ids := strings.split(token.value, ".", allocator=context.temp_allocator)
 
-  b := false
   resolved: Data
-
-  for c in tmpl.context_stack {
-    resolved = data_dig(c.data, ids[0:1])
+  for ctx in tmpl.context_stack {
+    resolved = data_dig(ctx.data, ids[0:1])
     if resolved != nil {
       break
     }
   }
 
+  // Apply "dotted name resolution" if we have parts after the core ID.
   if len(ids[1:]) > 0 {
     resolved = data_dig(resolved, ids[1:])
   }
 
+  // Make sure that the final value is a string. If not, raise
+  // error.
   str, ok := resolved.(string)
   if !ok {
     fmt.println("COULD NOT RESOLVE TO A STRING")
@@ -468,40 +476,27 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   inject_at(&tmpl.context_stack, 0, root)
 
   for token in tmpl.lexer.tokens {
-    if !template_valid_scope(tmpl, token) {
+    if !token_valid_in_template_context(tmpl, token) {
       continue
     }
 
-    #partial switch token.type {
+    switch token.type {
       case .Text:
         append(&str, token.value)
       case .Tag:
-        switch data in tmpl.data {
-          case string:
-            append(&str, escape_html_string(data))
-          case Map:
-            append(&str, template_stack_extract(tmpl, token, true))
-        }
+        append(&str, template_stack_extract(tmpl, token, true))
       case .TagLiteral:
-        switch data in tmpl.data {
-          case string:
-            append(&str, data)
-          case Map:
-            append(&str, template_stack_extract(tmpl, token, false))
-        }
+        append(&str, template_stack_extract(tmpl, token, false))
       case .TagLiteralTriple:
-        switch data in tmpl.data {
-          case string:
-            append(&str, data)
-          case Map:
-            append(&str, template_stack_extract(tmpl, token, false))
-        }
+        append(&str, template_stack_extract(tmpl, token, false))
       case .SectionOpen:
         template_add_to_context_stack(tmpl, token.value)
       case .SectionClose:
         template_pop_from_context_stack(tmpl)
+      // Do nothing for these cases.
       case .Comment:
-        // Do nothing.
+      case .CommentStandalone:
+      case .EOF:
     }
   }
 
