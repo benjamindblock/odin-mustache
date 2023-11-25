@@ -121,8 +121,15 @@ data_dig :: proc(data: Data, keys: []string) -> (Data) {
 
   for k in keys {
     switch _data in data {
+      // Return nil when a string is hit. These can only be accessed
+      // with the implicit "." operator.
       case string:
-        return _data
+        if keys[0] == "." {
+          return _data
+        } else {
+          dug: Data
+          return dug
+        }
       case List:
         return _data
       case Map:
@@ -234,8 +241,6 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
     case .Comment:
       token_text = ""
   }
-
-  // fmt.printf("Token '%v'\n", token_text)
 
   if start_pos != end_pos && len(token_text) > 0 {
     token := Token{
@@ -417,21 +422,7 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
 
   switch _data in current_stack.data {
     case Map:
-      // n := "null" in _data
-      // b := "" in _data
-      // s := "false" in _data
-      // return !n && !b && !s
-      if len(_data) == 1 {
-        for _, v in _data {
-          #partial switch _v in v {
-            case string:
-              return !_falsey_context[_v]
-          }
-        }
-      } else {
-        return true
-      }
-      // return true
+      return true
     case List:
       return len(_data) > 0 
     case string:
@@ -449,30 +440,14 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool)
   str: string
   resolved: Data
   ok: bool
-  fmt.println(token.value, tmpl.context_stack[0].label)
 
   if token.value == "." {
-    #partial switch _data in tmpl.context_stack[0].data {
-      case Map:
-        for k, v in _data {
-          resolved = v
-        }
-      case string:
-        resolved = _data
-    }
-  } else if token.value == tmpl.context_stack[0].label {
-    fmt.println("HERE")
     resolved = tmpl.context_stack[0].data
   } else {
     // If the top of the stack is a string and we need to access a hash of data,
     // dig from the layer beneath the top.
     ids := strings.split(token.value, ".", allocator=context.temp_allocator)
-    stack := tmpl.context_stack[:]
-    str, is_s := stack[0].data.(string)
-    if is_s {
-      stack = stack[1:]
-    }
-    for ctx in stack {
+    for ctx in tmpl.context_stack {
       resolved = data_dig(ctx.data, ids[0:1])
       if resolved != nil {
         break
@@ -482,6 +457,10 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool)
     // Apply "dotted name resolution" if we have parts after the core ID.
     if len(ids[1:]) > 0 {
       resolved = data_dig(resolved, ids[1:])
+      r, ok := resolved.(Map)
+      if ok && slice.last(ids[:]) in r {
+        resolved = r[slice.last(ids[:])]
+      }
     }
   }
 
@@ -670,8 +649,6 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     if !token_valid_in_template_context(tmpl, token) {
       continue
     }
-
-    template_print_stack(tmpl)
 
     switch token.type {
       case .Text:
