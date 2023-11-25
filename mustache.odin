@@ -3,6 +3,7 @@ package mustache
 import "core:fmt"
 import "core:mem"
 import "core:os"
+import "core:slice"
 import "core:strings"
 
 /*
@@ -74,15 +75,18 @@ Lexer :: struct {
 // 3. A mapping from string => more Data
 // 4. An array of Data?
 Map :: distinct map[string]Data
+List :: distinct [dynamic]Data
 Data :: union {
   Map,
+  List,
   string
 }
 
 Template :: struct {
   lexer: Lexer,
   data: Data,
-  context_stack: [dynamic]ContextStackEntry
+  context_stack: [dynamic]ContextStackEntry,
+  pos: int
 }
 
 ContextStackEntry :: struct {
@@ -115,6 +119,8 @@ data_dig :: proc(data: Data, keys: []string) -> (Data) {
   for k in keys {
     switch _data in data {
       case string:
+        return _data
+      case List:
         return _data
       case Map:
         data = _data[k]
@@ -408,6 +414,8 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   switch _data in current_stack.data {
     case Map:
       return true
+    case List:
+      return len(_data) > 0 
     case string:
       return !_falsey_context[_data]
   }
@@ -420,6 +428,10 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
         error and message during the string confirmation phase.
 */
 template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool) -> (string) {
+  if token.value == "." {
+    return tmpl.context_stack[0].data.(string)
+  }
+
   ids := strings.split(token.value, ".", allocator=context.temp_allocator)
 
   resolved: Data
@@ -457,17 +469,108 @@ template_print_stack :: proc(tmpl: ^Template) {
   }
 }
 
-template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string) {
+/*
+  ... when a list is encountered ...
+
+  .SectionOpen #repo ["resque", "sidekiq", "countries"]
+    .Text
+    .Tag
+  .SectionClose /repo
+
+  ... becomes ...
+
+  .SectionOpen #repo ["resque", "sidekiq", "countries"]
+    .SectionOpen "resque"
+      .Text
+      .Tag
+    .SectionClose "resque"
+    .SectionOpen "sidekiq"
+      .Text
+      .Tag
+    .SectionClose "sidekiq"
+    .SectionOpen "countries"
+      .Text
+      .Tag
+    .SectionClose "countries"
+  .SectionClose /repo
+*/
+template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: int) {
   ids := strings.split(data_id, ".", allocator=context.temp_allocator)
+
   // New stack entries always need to resolve against the current top
   // of the stack entry.
   to_add := data_dig(tmpl.context_stack[0].data, ids)
-  stack_entry := ContextStackEntry{data=to_add, label=data_id}
-  inject_at(&tmpl.context_stack, 0, stack_entry)
+
+  switch _data in to_add {
+    case Map:
+      stack_entry := ContextStackEntry{data=to_add, label=data_id}
+      inject_at(&tmpl.context_stack, 0, stack_entry)
+    case List:
+      // template_pop_from_context_stack(tmpl)
+      start_chunk := index + 1
+      end_chunk := template_find_section_close_tag_index(tmpl, data_id, index)
+      chunk := slice.clone_to_dynamic(tmpl.lexer.tokens[start_chunk:end_chunk])
+
+      // Remove the original chunk from the token list.
+      for _ in start_chunk..<end_chunk {
+        ordered_remove(&tmpl.lexer.tokens, start_chunk)
+      }
+
+      // Add the "loop" chunk N-times to the token list.
+      ordered_remove(&tmpl.context_stack, 0)
+      insert_length := 0
+      for i in 0..<len(_data) {
+        // When performing list-substitution, add a .SectionClose to pop off
+        // the top item IF it is NOT a list items. List items will need to
+        // undergo substitution and should not be discarded.
+        #partial switch _d in _data[i] {
+          case Map, string:
+            inject_at(&tmpl.lexer.tokens, start_chunk, Token{.SectionClose, "TEMP LIST", 0, 0})
+            insert_length += 1
+        }
+        #reverse for t in chunk {
+          inject_at(&tmpl.lexer.tokens, start_chunk, t)
+          insert_length += 1
+        }
+
+        // Add the loop data to the context_stack in reverse order of the list,
+        // so that the first entry is at the top.
+        stack_entry := ContextStackEntry{data=_data[len(_data)-1-i], label="TEMP LIST"}
+        inject_at(&tmpl.context_stack, 0, stack_entry)
+      }
+    case string:
+      stack_entry := ContextStackEntry{data=to_add, label=data_id}
+      inject_at(&tmpl.context_stack, 0, stack_entry)
+  }
+}
+
+template_find_section_close_tag_index :: proc(tmpl: ^Template, label: string, index: int) -> (int) {
+  for token, i in tmpl.lexer.tokens[index:] {
+    #partial switch token.type {
+      case .SectionClose:
+        if token.value == label {
+          return i + index
+        }
+    }
+  }
+
+  return -1
 }
 
 template_pop_from_context_stack :: proc(tmpl: ^Template) {
-  ordered_remove(&tmpl.context_stack, 0)
+  if len(tmpl.context_stack) > 1 {
+    ordered_remove(&tmpl.context_stack, 0)
+  }
+}
+
+template_print_tokens :: proc(tmpl: ^Template) {
+  for t, i in tmpl.lexer.tokens {
+    if i == tmpl.pos {
+      fmt.println(" -->", t)
+    } else {
+      fmt.println("    ", t)
+    }
+  }
 }
 
 template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
@@ -475,7 +578,9 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
   inject_at(&tmpl.context_stack, 0, root)
 
-  for token in tmpl.lexer.tokens {
+  for token, i in tmpl.lexer.tokens {
+    tmpl.pos = i
+
     if !token_valid_in_template_context(tmpl, token) {
       continue
     }
@@ -490,7 +595,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
       case .TagLiteralTriple:
         append(&str, template_stack_extract(tmpl, token, false))
       case .SectionOpen:
-        template_add_to_context_stack(tmpl, token.value)
+        template_add_to_context_stack(tmpl, token.value, i)
       case .SectionClose:
         template_pop_from_context_stack(tmpl)
       // Do nothing for these cases.
@@ -513,33 +618,76 @@ render :: proc(input: string, data: Data) -> (string, bool) {
     return "", false
   }
 
-  template := Template{lexer=lexer, data=data}
+  template := Template{lexer=lexer, data=data, pos=0}
   return template_process(&template)
 }
 
 _main :: proc() -> (err: Error) {
   defer free_all(context.temp_allocator)
 
-  input := "\"{{#sec}}{{a}}, {{b}}, {{c.d}}{{/sec}}\""
+  // TEST 2
+  input := "{{#repo}}\n<b>{{.}}</b>{{/repo}}"
   data := Map {
-    "a" = "foo",
-    "b" = "wrong",
-    "sec" = Map {
-      "b" = "bar"
-    },
-    "c" = Map {
-      "d" = "baz"
-    }
+    "repo" = List{"resque", "sidekiq", "countries"}
   }
 
-  fmt.printf("====== RENDERING STARTED\n")
+  fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
   output, ok := render(input, data)
   if !ok {
     return .Something
   }
-  fmt.printf("====== RENDERING COMPLETED\n")
-  fmt.printf("Output: '%v'\n", output)
+  fmt.printf("Output: %v\n", output)
+  fmt.println("")
+
+  // TEST 2
+  input = "{{#os}}\n<b>{{name}}</b>{{/os}}"
+  data = Map {
+    "os" = List{
+      Map { "name" = "MacOS" },
+      Map { "name" = "Windows" }
+    }
+  }
+
+  fmt.printf("====== RENDERING\n")
+  fmt.printf("Input : '%v'\n", input)
+  output, ok = render(input, data)
+  if !ok {
+    return .Something
+  }
+  fmt.printf("Output: %v\n", output)
+  fmt.println("")
+
+  // TEST 3
+  input = "{{#.}}({{value}}){{/.}}"
+  data2 := List {
+    Map { "value" = "a" },
+    Map { "value" = "b" }
+  }
+
+  fmt.printf("====== RENDERING\n")
+  fmt.printf("Input : '%v'\n", input)
+  output, ok = render(input, data2)
+  if !ok {
+    return .Something
+  }
+  fmt.printf("Output: %v\n", output)
+  fmt.println("")
+
+  // TEST 4
+  input = "\"{{#list}}({{#.}}{{.}}{{/.}}){{/list}}\""
+  data2 = List {
+    List{"1", "2", "3"},
+    List{"a", "b", "c"}
+  }
+
+  fmt.printf("====== RENDERING\n")
+  fmt.printf("Input : '%v'\n", input)
+  output, ok = render(input, data2)
+  if !ok {
+    return .Something
+  }
+  fmt.printf("Output: %v\n", output)
   fmt.println("")
 
   return .None
