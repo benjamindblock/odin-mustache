@@ -41,6 +41,7 @@ Error :: enum {
 }
 
 TokenType :: enum {
+  Unknown,
   Text,
   Tag,
   TagLiteral,
@@ -210,7 +211,7 @@ is_standalone_tag :: proc(s: string) -> (bool) {
 append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
   start_pos := lexer.last_token_start_pos
   end_pos := lexer.cursor
-  token_text := lexer.data[start_pos:end_pos]
+  token_text := strings.clone(lexer.data[start_pos:end_pos], allocator=context.temp_allocator)
 
   // Superfluous whitespace inside a tag should be ignored when
   // we access the data.
@@ -262,7 +263,7 @@ lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
     lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
   }
 
-  if lexer.standalone_tag {
+  if cur_type == .Comment && lexer.standalone_tag {
     chomping := true
     for i := lexer.last_token_start_pos; i < len(lexer.data) && chomping; i += 1 {
       if rune(lexer.data[i]) == '\n' || rune(lexer.data[i]) == '\r' {
@@ -416,7 +417,21 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
 
   switch _data in current_stack.data {
     case Map:
-      return true
+      // n := "null" in _data
+      // b := "" in _data
+      // s := "false" in _data
+      // return !n && !b && !s
+      if len(_data) == 1 {
+        for _, v in _data {
+          #partial switch _v in v {
+            case string:
+              return !_falsey_context[_v]
+          }
+        }
+      } else {
+        return true
+      }
+      // return true
     case List:
       return len(_data) > 0 
     case string:
@@ -434,6 +449,7 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool)
   str: string
   resolved: Data
   ok: bool
+  fmt.println(token.value, tmpl.context_stack[0].label)
 
   if token.value == "." {
     #partial switch _data in tmpl.context_stack[0].data {
@@ -444,9 +460,19 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool)
       case string:
         resolved = _data
     }
+  } else if token.value == tmpl.context_stack[0].label {
+    fmt.println("HERE")
+    resolved = tmpl.context_stack[0].data
   } else {
+    // If the top of the stack is a string and we need to access a hash of data,
+    // dig from the layer beneath the top.
     ids := strings.split(token.value, ".", allocator=context.temp_allocator)
-    for ctx in tmpl.context_stack {
+    stack := tmpl.context_stack[:]
+    str, is_s := stack[0].data.(string)
+    if is_s {
+      stack = stack[1:]
+    }
+    for ctx in stack {
       resolved = data_dig(ctx.data, ids[0:1])
       if resolved != nil {
         break
@@ -458,7 +484,6 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool)
       resolved = data_dig(resolved, ids[1:])
     }
   }
-
 
   // Make sure that the final value is a string. If not, raise
   // error.
@@ -558,10 +583,11 @@ template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: i
         inject_at(&tmpl.context_stack, 0, stack_entry)
       }
     case string:
-      stack_entry := ContextStackEntry{
-        data=Map{data_id = to_add},
-        label=data_id
-      }
+      // stack_entry := ContextStackEntry{
+      //   data=Map{data_id = to_add},
+      //   label=data_id
+      // }
+      stack_entry := ContextStackEntry{data=to_add, label=data_id}
       inject_at(&tmpl.context_stack, 0, stack_entry)
   }
 }
@@ -595,6 +621,44 @@ template_print_tokens :: proc(tmpl: ^Template) {
   }
 }
 
+token_standalone :: proc(lexer: ^Lexer, i: int) {
+  tokens := lexer.tokens
+  cur := tokens[i]
+  prev_i := i - 1
+  next_i := i + 1
+
+  prev: Token
+  next: Token
+
+  if prev_i >= 0 && tokens[prev_i].type == .Text {
+    prev = tokens[prev_i]
+  }
+
+  if next_i < len(tokens) && tokens[next_i].type == .Text {
+    next = tokens[next_i]
+  }
+
+  if prev.type == .Unknown && next.type != .Unknown {
+    if strings.has_prefix(next.value, "\n") {
+      next.value = strings.trim_prefix(next.value, "\n")
+      lexer.tokens[next_i] = next
+    }
+  } else if prev.type != .Unknown && next.type == .Unknown {
+    if strings.has_suffix(prev.value, "\n") {
+      prev.value = strings.trim_suffix(prev.value, "\n")
+      lexer.tokens[prev_i] = prev
+    }
+  } else if prev.type != .Unknown && next.type != .Unknown {
+    if strings.has_suffix(prev.value, "\n") && strings.has_prefix(next.value, "\n") {
+      prev.value = strings.trim_suffix(prev.value, "\n")
+      lexer.tokens[prev_i] = prev
+
+      next.value = strings.trim_prefix(next.value, "\n")
+      lexer.tokens[next_i] = next
+    }
+  }
+}
+
 template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   str: [dynamic]string
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
@@ -607,33 +671,44 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
       continue
     }
 
+    template_print_stack(tmpl)
+
     switch token.type {
       case .Text:
         append(&str, token.value)
       case .Tag:
+        // token_standalone(&tmpl.lexer, i)
         append(&str, template_stack_extract(tmpl, token, true))
       case .TagLiteral:
+        // token_standalone(&tmpl.lexer, i)
         append(&str, template_stack_extract(tmpl, token, false))
       case .TagLiteralTriple:
+        // token_standalone(&tmpl.lexer, i)
         append(&str, template_stack_extract(tmpl, token, false))
       case .SectionOpen:
+        token_standalone(&tmpl.lexer, i)
         template_add_to_context_stack(tmpl, token.value, i)
-        template_print_stack(tmpl)
+        // template_print_stack(tmpl)
       case .SectionClose:
+        token_standalone(&tmpl.lexer, i)
         template_pop_from_context_stack(tmpl)
-      // Do nothing for these cases.
       case .Comment:
+        token_standalone(&tmpl.lexer, i)
+      // Do nothing for these cases.
       case .CommentStandalone:
+      case .Unknown:
       case .EOF:
     }
   }
+
+  // template_print_tokens(tmpl)
 
   output = strings.concatenate(str[:])
   return output, true
 }
 
 render :: proc(input: string, data: Data) -> (string, bool) {
-  lexer := Lexer{data=input}
+  lexer := Lexer{data=input, cur_token_type=.Text}
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
 
@@ -697,60 +772,60 @@ _main :: proc() -> (err: Error) {
   // fmt.printf("Output: %v\n", output)
   // fmt.println("")
 
-  // TEST 4
-  input := "\"{{#list}}({{#.}}{{.}}{{/.}}){{/list}}\""
-  data2 := List {
-    List{"1", "2", "3"},
-    List{"a", "b", "c"}
-  }
+  // // TEST 4
+  // input := "\"{{#list}}({{#.}}{{.}}{{/.}}){{/list}}\""
+  // data2 := List {
+  //   List{"1", "2", "3"},
+  //   List{"a", "b", "c"}
+  // }
 
-  fmt.printf("====== RENDERING\n")
-  fmt.printf("Input : '%v'\n", input)
-  output, ok := render(input, data2)
-  if !ok {
-    return .Something
-  }
-  fmt.printf("Output: %v\n", output)
-  fmt.println("")
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // output, ok := render(input, data2)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
 
-  // TEST 4
-  input = "{{#tops}}{{#middles}}{{tname.lower}}{{mname}}.{{#bottoms}}{{tname.upper}}{{mname}}{{bname}}.{{/bottoms}}{{/middles}}{{/tops}}"
+  // // TEST 4
+  // input = "{{#tops}}{{#middles}}{{tname.lower}}{{mname}}.{{#bottoms}}{{tname.upper}}{{mname}}{{bname}}.{{/bottoms}}{{/middles}}{{/tops}}"
+  // data := Map {
+  //   "tops" = List {
+  //     Map {
+  //       "tname" = Map {
+  //         "upper" = "A",
+  //         "lower" = "a"
+  //       },
+  //       "middles" = List {
+  //         Map {
+  //           "mname" = "1",
+  //           "bottoms" = List {
+  //             Map {
+  //               "bname" = "x"
+  //             },
+  //             Map {
+  //               "bname" = "y"
+  //             }
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
+
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // fmt.printf("Data : '%v'\n", data)
+  // output, ok = render(input, data)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
+
+  input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{#d}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{#five}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{/five}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{/d}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
   data := Map {
-    "tops" = List {
-      Map {
-        "tname" = Map {
-          "upper" = "A",
-          "lower" = "a"
-        },
-        "middles" = List {
-          Map {
-            "mname" = "1",
-            "bottoms" = List {
-              Map {
-                "bname" = "x"
-              },
-              Map {
-                "bname" = "y"
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  fmt.printf("====== RENDERING\n")
-  fmt.printf("Input : '%v'\n", input)
-  fmt.printf("Data : '%v'\n", data)
-  output, ok = render(input, data)
-  if !ok {
-    return .Something
-  }
-  fmt.printf("Output: %v\n", output)
-  fmt.println("")
-
-  input = "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{#d}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{#five}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{/five}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{/d}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
-  data = Map {
     "a" = Map {
       "one" = "1"
     },
@@ -769,29 +844,44 @@ _main :: proc() -> (err: Error) {
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
   fmt.printf("Data : '%v'\n", data)
-  output, ok = render(input, data)
+  output, ok := render(input, data)
   if !ok {
     return .Something
   }
   fmt.printf("Output: %v\n", output)
   fmt.println("")
 
-  input = "{{#bool}}\n* first\n{{/bool}}\n* {{two}}\n{{#bool}}\n* third\n{{/bool}}\n"
+  input = "| A {{#bool}}B {{#bool}}C{{/bool}} D{{/bool}} E |"
   data = Map {
-    "bool" = "true",
-    "two" = "second"
+    "bool" = "false"
   }
 
   fmt.printf("====== RENDERING\n")
+  fmt.printf("Input : '%v'\n", input)
+  fmt.printf("Data : '%v'\n", data)
   output, ok = render(input, data)
   if !ok {
     return .Something
   }
-  fmt.printf("Data : '%v'\n", data)
-  fmt.printf("Input : '%v'\n", input)
   fmt.printf("Output: %v\n", output)
-  fmt.println("* first\n* second\n* third\n")
   fmt.println("")
+
+  // input := "{{#bool}}\n* first\n{{/bool}}\n* {{two}}\n{{#bool}}\n* third\n{{/bool}}\n"
+  // data := Map {
+  //   "bool" = "true",
+  //   "two" = "second"
+  // }
+
+  // fmt.printf("====== RENDERING\n")
+  // output, ok := render(input, data)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Data : '%v'\n", data)
+  // fmt.printf("Input : '%v'\n", input)
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("* first\n* second\n* third\n")
+  // fmt.println("")
 
   return .None
 }
