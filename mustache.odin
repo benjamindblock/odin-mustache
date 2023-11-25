@@ -428,30 +428,33 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
         error and message during the string confirmation phase.
 */
 template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool) -> (string) {
-  if token.value == "." {
-    return tmpl.context_stack[0].data.(string)
-  }
-
-  ids := strings.split(token.value, ".", allocator=context.temp_allocator)
-
+  str: string
   resolved: Data
-  for ctx in tmpl.context_stack {
-    resolved = data_dig(ctx.data, ids[0:1])
-    if resolved != nil {
-      break
+  ok: bool
+
+  if token.value == "." {
+    resolved = tmpl.context_stack[0].data
+  } else {
+    ids := strings.split(token.value, ".", allocator=context.temp_allocator)
+    for ctx in tmpl.context_stack {
+      resolved = data_dig(ctx.data, ids[0:1])
+      if resolved != nil {
+        break
+      }
+    }
+
+    // Apply "dotted name resolution" if we have parts after the core ID.
+    if len(ids[1:]) > 0 {
+      resolved = data_dig(resolved, ids[1:])
     }
   }
 
-  // Apply "dotted name resolution" if we have parts after the core ID.
-  if len(ids[1:]) > 0 {
-    resolved = data_dig(resolved, ids[1:])
-  }
 
   // Make sure that the final value is a string. If not, raise
   // error.
-  str, ok := resolved.(string)
+  str, ok = resolved.(string)
   if !ok {
-    fmt.println("COULD NOT RESOLVE TO A STRING")
+    fmt.println("COULD NOT RESOLVE", resolved, "TO A STRING")
     return ""
   }
 
@@ -501,6 +504,12 @@ template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: i
   // of the stack entry.
   to_add := data_dig(tmpl.context_stack[0].data, ids)
 
+  // If we couldn't resolve against the top of the stack, add from the
+  // root section.
+  if to_add == nil {
+    to_add = data_dig(tmpl.context_stack[len(tmpl.context_stack)-1].data, ids)
+  }
+
   switch _data in to_add {
     case Map:
       stack_entry := ContextStackEntry{data=to_add, label=data_id}
@@ -517,7 +526,7 @@ template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: i
       }
 
       // Add the "loop" chunk N-times to the token list.
-      ordered_remove(&tmpl.context_stack, 0)
+      // ordered_remove(&tmpl.context_stack, 0)
       insert_length := 0
       for i in 0..<len(_data) {
         // When performing list-substitution, add a .SectionClose to pop off
@@ -596,6 +605,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
         append(&str, template_stack_extract(tmpl, token, false))
       case .SectionOpen:
         template_add_to_context_stack(tmpl, token.value, i)
+        template_print_stack(tmpl)
       case .SectionClose:
         template_pop_from_context_stack(tmpl)
       // Do nothing for these cases.
@@ -625,49 +635,65 @@ render :: proc(input: string, data: Data) -> (string, bool) {
 _main :: proc() -> (err: Error) {
   defer free_all(context.temp_allocator)
 
-  // TEST 2
-  input := "{{#repo}}\n<b>{{.}}</b>{{/repo}}"
-  data := Map {
-    "repo" = List{"resque", "sidekiq", "countries"}
-  }
+  // // TEST 2
+  // input := "{{#repo}}\n<b>{{.}}</b>{{/repo}}"
+  // data := Map {
+  //   "repo" = List{"resque", "sidekiq", "countries"}
+  // }
 
-  fmt.printf("====== RENDERING\n")
-  fmt.printf("Input : '%v'\n", input)
-  output, ok := render(input, data)
-  if !ok {
-    return .Something
-  }
-  fmt.printf("Output: %v\n", output)
-  fmt.println("")
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // output, ok := render(input, data)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
 
-  // TEST 2
-  input = "{{#os}}\n<b>{{name}}</b>{{/os}}"
-  data = Map {
-    "os" = List{
-      Map { "name" = "MacOS" },
-      Map { "name" = "Windows" }
-    }
-  }
+  // // TEST 2
+  // input = "{{#os}}\n<b>{{name}}</b>{{/os}}"
+  // data = Map {
+  //   "os" = List{
+  //     Map { "name" = "MacOS" },
+  //     Map { "name" = "Windows" }
+  //   }
+  // }
 
-  fmt.printf("====== RENDERING\n")
-  fmt.printf("Input : '%v'\n", input)
-  output, ok = render(input, data)
-  if !ok {
-    return .Something
-  }
-  fmt.printf("Output: %v\n", output)
-  fmt.println("")
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // output, ok = render(input, data)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
 
-  // TEST 3
-  input = "{{#.}}({{value}}){{/.}}"
+  // // TEST 3
+  // input = "{{#.}}({{value}}){{/.}}"
+  // data2 := List {
+  //   Map { "value" = "a" },
+  //   Map { "value" = "b" }
+  // }
+
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // output, ok = render(input, data2)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
+
+  // TEST 4
+  input := "\"{{#list}}({{#.}}{{.}}{{/.}}){{/list}}\""
   data2 := List {
-    Map { "value" = "a" },
-    Map { "value" = "b" }
+    List{"1", "2", "3"},
+    List{"a", "b", "c"}
   }
 
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
-  output, ok = render(input, data2)
+  output, ok := render(input, data2)
   if !ok {
     return .Something
   }
@@ -675,15 +701,62 @@ _main :: proc() -> (err: Error) {
   fmt.println("")
 
   // TEST 4
-  input = "\"{{#list}}({{#.}}{{.}}{{/.}}){{/list}}\""
-  data2 = List {
-    List{"1", "2", "3"},
-    List{"a", "b", "c"}
+  input = "{{#tops}}{{#middles}}{{tname.lower}}{{mname}}.{{#bottoms}}{{tname.upper}}{{mname}}{{bname}}.{{/bottoms}}{{/middles}}{{/tops}}"
+  data := Map {
+    "tops" = List {
+      Map {
+        "tname" = Map {
+          "upper" = "A",
+          "lower" = "a"
+        },
+        "middles" = List {
+          Map {
+            "mname" = "1",
+            "bottoms" = List {
+              Map {
+                "bname" = "x"
+              },
+              Map {
+                "bname" = "y"
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
-  output, ok = render(input, data2)
+  fmt.printf("Data : '%v'\n", data)
+  output, ok = render(input, data)
+  if !ok {
+    return .Something
+  }
+  fmt.printf("Output: %v\n", output)
+  fmt.println("")
+
+  input = "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{#d}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{#five}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{/five}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{/d}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
+  data = Map {
+    "a" = Map {
+      "one" = "1"
+    },
+    "b" = Map {
+      "two" = "2"
+    },
+    "c" = Map {
+      "three" = "3",
+      "d" = Map {
+        "four" = "4",
+        "five" = "5"
+      }
+    }
+  }
+
+  fmt.printf("====== RENDERING\n")
+  fmt.printf("Input : '%v'\n", input)
+  fmt.printf("Data : '%v'\n", data)
+  output, ok = render(input, data)
   if !ok {
     return .Something
   }

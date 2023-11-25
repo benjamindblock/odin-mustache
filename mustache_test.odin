@@ -52,9 +52,13 @@ convert :: proc(val: json.Value) -> (Data) {
         data[new_k] = new_v
       }
       input = data
-    // TODO: Handle arrays.
     case json.Array:
-      input = ""
+      data := make(List, allocator=context.temp_allocator)
+      for val in v {
+        new_v := convert(val)
+        append(&data, new_v)
+      }
+      input = data
   }
 
   return input
@@ -159,7 +163,7 @@ test_sections_spec :: proc(t: ^testing.T) {
   tests := root["tests"].(json.Array)
 
   for test, i in tests {
-    if i > 5 do break
+    if i > 9 do break
     test_obj := test.(json.Object)
     test_name := test_obj["name"].(string)
     test_desc := test_obj["desc"].(string)
