@@ -163,7 +163,7 @@ test_sections_spec :: proc(t: ^testing.T) {
   tests := root["tests"].(json.Array)
 
   for test, i in tests {
-    if i > 12 do break
+    if i > 13 do break
     test_obj := test.(json.Object)
     test_name := test_obj["name"].(string)
     test_desc := test_obj["desc"].(string)

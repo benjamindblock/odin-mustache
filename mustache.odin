@@ -413,14 +413,22 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
     return true
   }
 
+  data: Data
+
   #partial switch token.type {
     case .SectionClose:
       return true
     case .Comment:
       return true
+    case .SectionOpen:
+      fmt.println("HERE")
+      fmt.println(template_stack_extract(tmpl, token, false))
+      data = template_stack_extract(tmpl, token, false)
+    case:
+      data = tmpl.context_stack[0].data
   }
 
-  switch _data in current_stack.data {
+  switch _data in data {
     case Map:
       return true
     case List:
@@ -517,6 +525,8 @@ template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: i
   // New stack entries always need to resolve against the current top
   // of the stack entry.
   to_add := data_dig(tmpl.context_stack[0].data, ids)
+
+  fmt.println("TOO ADD", to_add)
 
   // If we couldn't resolve against the top of the stack, add from the
   // root section.
@@ -646,26 +656,34 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   for token, i in tmpl.lexer.tokens {
     tmpl.pos = i
 
-    if !token_valid_in_template_context(tmpl, token) {
-      continue
-    }
+    // if !token_valid_in_template_context(tmpl, token) {
+    //   continue
+    // }
 
     switch token.type {
       case .Text:
-        append(&str, token.value)
+        if token_valid_in_template_context(tmpl, token) {
+          append(&str, token.value)
+        }
       case .Tag:
         // token_standalone(&tmpl.lexer, i)
-        append(&str, template_stack_extract(tmpl, token, true))
+        if token_valid_in_template_context(tmpl, token) {
+          append(&str, template_stack_extract(tmpl, token, true))
+        }
       case .TagLiteral:
         // token_standalone(&tmpl.lexer, i)
-        append(&str, template_stack_extract(tmpl, token, false))
+        if token_valid_in_template_context(tmpl, token) {
+          append(&str, template_stack_extract(tmpl, token, false))
+        }
       case .TagLiteralTriple:
         // token_standalone(&tmpl.lexer, i)
-        append(&str, template_stack_extract(tmpl, token, false))
+        if token_valid_in_template_context(tmpl, token) {
+          append(&str, template_stack_extract(tmpl, token, false))
+        }
       case .SectionOpen:
         token_standalone(&tmpl.lexer, i)
         template_add_to_context_stack(tmpl, token.value, i)
-        // template_print_stack(tmpl)
+        template_print_stack(tmpl)
       case .SectionClose:
         token_standalone(&tmpl.lexer, i)
         template_pop_from_context_stack(tmpl)
@@ -678,7 +696,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     }
   }
 
-  // template_print_tokens(tmpl)
+  template_print_tokens(tmpl)
 
   output = strings.concatenate(str[:])
   return output, true
