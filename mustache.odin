@@ -409,6 +409,8 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
 token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool) {
   // The root stack is always valid.
   current_stack := tmpl.context_stack[0]
+
+  // TODO: This is the bug...
   if current_stack.label == "ROOT" {
     return true
   }
@@ -421,8 +423,6 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
     case .Comment:
       return true
     case .SectionOpen:
-      fmt.println("HERE")
-      fmt.println(template_stack_extract(tmpl, token, false))
       data = template_stack_extract(tmpl, token, false)
     case:
       data = tmpl.context_stack[0].data
@@ -430,7 +430,7 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
 
   switch _data in data {
     case Map:
-      return true
+      return len(_data) > 0
     case List:
       return len(_data) > 0 
     case string:
@@ -526,12 +526,15 @@ template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: i
   // of the stack entry.
   to_add := data_dig(tmpl.context_stack[0].data, ids)
 
-  fmt.println("TOO ADD", to_add)
-
   // If we couldn't resolve against the top of the stack, add from the
   // root section.
   if to_add == nil {
     to_add = data_dig(tmpl.context_stack[len(tmpl.context_stack)-1].data, ids)
+  }
+
+  // If we STILL can't find anything, mark this section as false-y.
+  if to_add == nil {
+    to_add = "false"
   }
 
   switch _data in to_add {
@@ -696,6 +699,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     }
   }
 
+  template_print_stack(tmpl)
   template_print_tokens(tmpl)
 
   output = strings.concatenate(str[:])
