@@ -23,6 +23,8 @@ STANDARD_OPEN :: "{{"
 STANDARD_CLOSE :: "}}"
 LITERAL_CLOSE :: "}}}"
 COMMENT_OPEN :: "{{!"
+SECTION_OPEN :: "{{#"
+SECTION_CLOSE :: "{{/"
 
 /*
   Special characters that will receive HTML-escaping
@@ -66,7 +68,7 @@ Lexer :: struct {
   cur_token_type: TokenType,
   last_token_start_pos: int,
   tag_stack: [dynamic]rune,
-  standalone_comment: bool
+  standalone_tag: bool
 }
 
 // All data provided will either be:
@@ -181,7 +183,7 @@ is_followed_by :: proc(s: string, search: string, end: int) -> (bool) {
 
 // A standalone comment will be on a new line, separate
 // from any other content.
-is_standalone_comment :: proc(s: string) -> (bool) {
+is_standalone_tag :: proc(s: string) -> (bool) {
   // If a .Comment is preceded by a .Text tag that is entirely
   // madeup of whitespace, we consider it standalone.
   if len(s) == strings.count(s, " ") {
@@ -216,8 +218,9 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
     // A text tag will be added as a Token without any modifications.
     case .Text:
       token_text = lexer.data[start_pos:end_pos]
-      if is_followed_by(lexer.data, COMMENT_OPEN, end_pos) && is_standalone_comment(token_text) {
-        lexer.standalone_comment = true
+
+      if is_followed_by(lexer.data, COMMENT_OPEN, end_pos) && is_standalone_tag(token_text) {
+        lexer.standalone_tag = true
         token_text = trim_right_whitespace(token_text)
       }
 
@@ -259,7 +262,7 @@ lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
     lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
   }
 
-  if cur_type == .Comment && lexer.standalone_comment {
+  if lexer.standalone_tag {
     chomping := true
     for i := lexer.last_token_start_pos; i < len(lexer.data) && chomping; i += 1 {
       if rune(lexer.data[i]) == '\n' || rune(lexer.data[i]) == '\r' {
@@ -269,7 +272,7 @@ lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
       }
     }
 
-    lexer.standalone_comment = false
+    lexer.standalone_tag = false
   }
 
   lexer.cur_token_type = new_type
@@ -433,7 +436,14 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool)
   ok: bool
 
   if token.value == "." {
-    resolved = tmpl.context_stack[0].data
+    #partial switch _data in tmpl.context_stack[0].data {
+      case Map:
+        for k, v in _data {
+          resolved = v
+        }
+      case string:
+        resolved = _data
+    }
   } else {
     ids := strings.split(token.value, ".", allocator=context.temp_allocator)
     for ctx in tmpl.context_stack {
@@ -548,7 +558,10 @@ template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: i
         inject_at(&tmpl.context_stack, 0, stack_entry)
       }
     case string:
-      stack_entry := ContextStackEntry{data=to_add, label=data_id}
+      stack_entry := ContextStackEntry{
+        data=Map{data_id = to_add},
+        label=data_id
+      }
       inject_at(&tmpl.context_stack, 0, stack_entry)
   }
 }
@@ -761,6 +774,23 @@ _main :: proc() -> (err: Error) {
     return .Something
   }
   fmt.printf("Output: %v\n", output)
+  fmt.println("")
+
+  input = "{{#bool}}\n* first\n{{/bool}}\n* {{two}}\n{{#bool}}\n* third\n{{/bool}}\n"
+  data = Map {
+    "bool" = "true",
+    "two" = "second"
+  }
+
+  fmt.printf("====== RENDERING\n")
+  output, ok = render(input, data)
+  if !ok {
+    return .Something
+  }
+  fmt.printf("Data : '%v'\n", data)
+  fmt.printf("Input : '%v'\n", input)
+  fmt.printf("Output: %v\n", output)
+  fmt.println("* first\n* second\n* third\n")
   fmt.println("")
 
   return .None
