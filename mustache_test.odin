@@ -72,8 +72,8 @@ assert_mustache :: proc(t: ^testing.T,
                         loc := #caller_location) {
   output, _ := render(input, data)
   fmt.println("Input   :", input)
-  fmt.println("Expected:", exp_output)
-  fmt.println("Output  :", output)
+  // fmt.println("Expected:", exp_output)
+  // fmt.println("Output  :", output)
   testing.expect_value(t, output, exp_output, loc)
 }
 
@@ -163,7 +163,7 @@ test_sections_spec :: proc(t: ^testing.T) {
   tests := root["tests"].(json.Array)
 
   for test, i in tests {
-    if i > 26 do break
+    if i > 31 do break
     test_obj := test.(json.Object)
     test_name := test_obj["name"].(string)
     test_desc := test_obj["desc"].(string)

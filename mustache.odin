@@ -227,10 +227,11 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
     case .Text:
       token_text = lexer.data[start_pos:end_pos]
 
-      if is_followed_by(lexer.data, COMMENT_OPEN, end_pos) && is_standalone_tag(token_text) {
-        lexer.standalone_tag = true
-        token_text = trim_right_whitespace(token_text)
-      }
+      // if is_followed_by(lexer.data, COMMENT_OPEN, end_pos) && is_standalone_tag(token_text) {
+      //   fmt.println("STANDALONE")
+      //   lexer.standalone_tag = true
+      //   token_text = trim_right_whitespace(token_text)
+      // }
 
     // Remove all empty whitespace inside a valid tag so that we don't
     // mess up our access of the data.
@@ -389,6 +390,17 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
   "false" = true,
   "null" = true,
   "" = true
+}
+
+/*
+  Returns true if the value is one of the "falsey" values
+  for a context.
+*/
+@(private) _whitespace := map[rune]bool{
+  ' ' = true,
+  '\n' = true,
+  '\t' = true,
+  '\r' = true
 }
 
 /*
@@ -630,31 +642,152 @@ token_standalone :: proc(lexer: ^Lexer, i: int) {
     next = tokens[next_i]
   }
 
+  fmt.println("token_standalone", prev, next)
+
   if prev.type == .Unknown && next.type != .Unknown {
-    if strings.has_prefix(next.value, "\n") {
-      next.value = strings.trim_prefix(next.value, "\n")
+    if starts_with_newline(next.value) {
+      fmt.println("\nTRIMMING PREFIX FROM NEXT TOKEN")
+      next.value = trim_whitespace_prefix(next.value, true)
       lexer.tokens[next_i] = next
     }
   } else if prev.type != .Unknown && next.type == .Unknown {
-    if strings.has_suffix(prev.value, "\n") {
-      prev.value = strings.trim_suffix(prev.value, "\n")
+    fmt.println("\nTRIMMING SUFFIX FROM PREV TOKEN")
+    if ends_with_newline(prev.value) {
+      prev.value = trim_whitespace_suffix(prev.value, true)
       lexer.tokens[prev_i] = prev
     }
   } else if prev.type != .Unknown && next.type != .Unknown {
-    if strings.has_suffix(prev.value, "\n") && strings.has_prefix(next.value, "\n") {
-      prev.value = strings.trim_suffix(prev.value, "\n")
+    fmt.println("\nTRIMMING BOTH")
+    if ends_with_newline(prev.value) && starts_with_newline(next.value) {
+      prev.value = trim_whitespace_suffix(prev.value)
       lexer.tokens[prev_i] = prev
-
-      next.value = strings.trim_prefix(next.value, "\n")
+      next.value = trim_whitespace_prefix(next.value)
       lexer.tokens[next_i] = next
     }
   }
+}
+
+// TODO: Have this return the index of the newline as well.
+ends_with_newline :: proc(s: string) -> (seen: bool) {
+  #reverse for r in s {
+    if !_whitespace[r] {
+      break
+    }
+
+    if r == '\n' {
+      seen = true
+      break
+    }
+  }
+
+  return seen
+}
+
+// TODO: Have this return the index of the newline as well.
+starts_with_newline :: proc(s: string) -> (seen: bool) {
+  for r in s {
+    if !_whitespace[r] {
+      break
+    }
+
+    if r == '\n' {
+      seen = true
+      break
+    }
+  }
+
+  return seen
+}
+
+trim_whitespace_suffix :: proc(s: string, include_newline := false) -> (string) {
+  if !ends_with_newline(s) {
+    return s
+  }
+
+  newline_index := -1
+  #reverse for r, i in s {
+    if r == '\n' {
+      newline_index = i
+      break
+    }
+  }
+
+  if newline_index == -1 {
+    return s
+  }
+
+  if newline_index == 0 && include_newline {
+    return ""
+  }
+
+  fmt.println("BEFORE SUFFIX", s, "DONE")
+  fmt.println("AFTER SUFFIX:", s[:newline_index], "DONE")
+
+  if include_newline {
+    return s[:newline_index-1]
+  } else {
+    return s[:newline_index]
+  }
+
+  // THIS WILL TRIM ALL THE WHITESPACE __AFTER__
+  // THE NEWLINE
+}
+
+trim_whitespace_prefix :: proc(s: string, include_newline := false) -> (string) {
+  if !starts_with_newline(s) {
+    fmt.println("HERE")
+    return s
+  }
+
+  newline_index := -1
+  for r, i in s {
+    if r == '\n' {
+      newline_index = i
+      break
+    }
+  }
+
+  fmt.println("NEWLINE INDEX", newline_index)
+
+  if newline_index == -1 {
+    return s
+  }
+
+  if newline_index == 0 && len(s) == 1 && include_newline {
+    return ""
+  }
+
+  fmt.println("BEFORE PREFIX", s, "DONE")
+  fmt.println("AFTER PREFIX:", s[newline_index:], "DONE")
+
+  if include_newline {
+    return s[newline_index+1:]
+  } else {
+    return s[newline_index:]
+  }
+
+  // THIS WILL TRIM ALL THE WHITESPACE UP TO AND
+  // __INCLUDING__ THE NEWLINE
+  // THE NEWLINE
 }
 
 template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   str: [dynamic]string
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
   inject_at(&tmpl.context_stack, 0, root)
+
+  // First iterate and remove newlines as necessary for
+  // standalone tags.
+  for token, i in tmpl.lexer.tokens {
+    #partial switch token.type {
+      case .SectionOpen:
+        token_standalone(&tmpl.lexer, i)
+      case .SectionClose:
+        token_standalone(&tmpl.lexer, i)
+      case .Comment:
+        token_standalone(&tmpl.lexer, i)
+    }
+  }
 
   for token, i in tmpl.lexer.tokens {
     tmpl.pos = i
@@ -684,14 +817,14 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
           append(&str, template_stack_extract(tmpl, token, false))
         }
       case .SectionOpen:
-        token_standalone(&tmpl.lexer, i)
+        // token_standalone(&tmpl.lexer, i)
         template_add_to_context_stack(tmpl, token.value, i)
         template_print_stack(tmpl)
       case .SectionClose:
-        token_standalone(&tmpl.lexer, i)
+        // token_standalone(&tmpl.lexer, i)
         template_pop_from_context_stack(tmpl)
       case .Comment:
-        token_standalone(&tmpl.lexer, i)
+        // token_standalone(&tmpl.lexer, i)
       // Do nothing for these cases.
       case .CommentStandalone:
       case .Unknown:
@@ -699,8 +832,8 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     }
   }
 
-  template_print_stack(tmpl)
-  template_print_tokens(tmpl)
+  // template_print_stack(tmpl)
+  // template_print_tokens(tmpl)
 
   output = strings.concatenate(str[:])
   return output, true
@@ -823,7 +956,8 @@ _main :: proc() -> (err: Error) {
   // fmt.printf("Output: %v\n", output)
   // fmt.println("")
 
-  input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{#d}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{#five}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{/five}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{/d}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
+  // input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{#d}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{#five}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{/five}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{/d}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
+  input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
   data := Map {
     "a" = Map {
       "one" = "1"
@@ -850,20 +984,20 @@ _main :: proc() -> (err: Error) {
   fmt.printf("Output: %v\n", output)
   fmt.println("")
 
-  input = "| A {{#bool}}B {{#bool}}C{{/bool}} D{{/bool}} E |"
-  data = Map {
-    "bool" = "false"
-  }
+  // input = "| A {{#bool}}B {{#bool}}C{{/bool}} D{{/bool}} E |"
+  // data = Map {
+  //   "bool" = "false"
+  // }
 
-  fmt.printf("====== RENDERING\n")
-  fmt.printf("Input : '%v'\n", input)
-  fmt.printf("Data : '%v'\n", data)
-  output, ok = render(input, data)
-  if !ok {
-    return .Something
-  }
-  fmt.printf("Output: %v\n", output)
-  fmt.println("")
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // fmt.printf("Data : '%v'\n", data)
+  // output, ok = render(input, data)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
 
   // input := "{{#bool}}\n* first\n{{/bool}}\n* {{two}}\n{{#bool}}\n* third\n{{/bool}}\n"
   // data := Map {
