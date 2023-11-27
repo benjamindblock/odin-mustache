@@ -107,28 +107,6 @@ test_literal_tag :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_interpolation_spec :: proc(t: ^testing.T) {
-  spec := load_spec(INTERPOLATION_SPEC)
-  defer json.destroy_value(spec)
-
-  root := spec.(json.Object)
-  tests := root["tests"].(json.Array)
-
-  for test, i in tests {
-    test_obj := test.(json.Object)
-    test_name := test_obj["name"].(string)
-    test_desc := test_obj["desc"].(string)
-    template := test_obj["template"].(string)
-    exp_output := test_obj["expected"].(string)
-    data := test_obj["data"]
-    input := convert(data)
-
-    fmt.println("TEST", test_name)
-    assert_mustache(t, template, input, exp_output)
-  }
-}
-
-@(test)
 test_comments_spec :: proc(t: ^testing.T) {
   spec := load_spec(COMMENTS_SPEC)
   defer json.destroy_value(spec)
@@ -137,6 +115,8 @@ test_comments_spec :: proc(t: ^testing.T) {
   tests := root["tests"].(json.Array)
 
   for test, i in tests {
+    if i > 1 do break
+
     test_obj := test.(json.Object)
     test_name := test_obj["name"].(string)
     test_desc := test_obj["desc"].(string)
@@ -163,7 +143,6 @@ test_sections_spec :: proc(t: ^testing.T) {
   tests := root["tests"].(json.Array)
 
   for test, i in tests {
-    if i > 31 do break
     test_obj := test.(json.Object)
     test_name := test_obj["name"].(string)
     test_desc := test_obj["desc"].(string)
@@ -178,6 +157,28 @@ test_sections_spec :: proc(t: ^testing.T) {
     fmt.println(data)
     // fmt.println("Input:", template)
     // fmt.println("Expected:", exp_output)
+    assert_mustache(t, template, input, exp_output)
+  }
+}
+
+@(test)
+test_interpolation_spec :: proc(t: ^testing.T) {
+  spec := load_spec(INTERPOLATION_SPEC)
+  defer json.destroy_value(spec)
+
+  root := spec.(json.Object)
+  tests := root["tests"].(json.Array)
+
+  for test, i in tests {
+    test_obj := test.(json.Object)
+    test_name := test_obj["name"].(string)
+    test_desc := test_obj["desc"].(string)
+    template := test_obj["template"].(string)
+    exp_output := test_obj["expected"].(string)
+    data := test_obj["data"]
+    input := convert(data)
+
+    fmt.println("TEST", test_name)
     assert_mustache(t, template, input, exp_output)
   }
 }

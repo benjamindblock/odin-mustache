@@ -49,8 +49,14 @@ TokenType :: enum {
   SectionOpen,
   SectionClose,
   Comment,
-  CommentStandalone,
+  Newline,
   EOF // The last token parsed, caller should not call again.
+}
+
+Pos :: struct {
+  start: int,
+  end: int,
+  line: int
 }
 
 // TODO: Just store the beginning/end position of the string
@@ -58,15 +64,13 @@ TokenType :: enum {
 Token :: struct {
   type: TokenType,
   value: string,
-  start_pos: int,
-  end_pos: int,
-  line: int
+  pos: Pos
 }
 
 Lexer :: struct {
   data: string,
   cursor: int,
-  line_cursor: int,
+  line: int,
   tokens: [dynamic]Token,
   cur_token_type: TokenType,
   last_token_start_pos: int,
@@ -171,12 +175,13 @@ trim_decimal_string :: proc(s: string) -> string {
 
 // Checks if a rune is plain whitespace.
 is_whitespace :: proc(r: rune) -> (bool) {
-  return r == ' '
+  return _whitespace[r]
 }
 
+// Checks if a string is plain whitespace.
 is_text_blank :: proc(s: string) -> (res: bool) {
   for r in s {
-    if !is_whitespace(r) {
+    if !_whitespace[r] {
       return false
     }
   }
@@ -187,133 +192,6 @@ is_text_blank :: proc(s: string) -> (res: bool) {
 // Trims all whitespace to the right of a string.
 trim_right_whitespace :: proc(s: string) -> (res: string) {
   return strings.trim_right_proc(s, is_whitespace)
-}
-
-// Checks if a specific substring appears directly AFTER the provided
-// end point in a string.
-is_followed_by :: proc(s: string, search: string, end: int) -> (bool) {
-  offset := len(search)
-  if len(s) > end + offset {
-    searchable := s[:end+offset]
-    return strings.has_suffix(searchable, search) 
-  } else {
-    return false
-  }
-}
-
-// A standalone comment will be on a new line, separate
-// from any other content.
-is_standalone_tag :: proc(s: string) -> (bool) {
-  // If a .Comment is preceded by a .Text tag that is entirely
-  // madeup of whitespace, we consider it standalone.
-  if len(s) == strings.count(s, " ") {
-    return true
-  }
-
-  newline_index := strings.index_rune(s, '\n')
-  if newline_index == -1 {
-    return false
-  }
-
-  for i := newline_index+1; i < len(s); i += 1 {
-    if !strings.is_space(rune(s[i])) {
-      return false
-    }
-  }
-
-  return true
-}
-
-/*
-  Adds a new token to our list.
-*/
-append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
-  start_pos := lexer.last_token_start_pos
-  end_pos := lexer.cursor
-  token_text := strings.clone(lexer.data[start_pos:end_pos], allocator=context.temp_allocator)
-
-  // Superfluous whitespace inside a tag should be ignored when
-  // we access the data.
-  #partial switch token_type {
-    // A text tag will be added as a Token without any modifications.
-    case .Text:
-      token_text = lexer.data[start_pos:end_pos]
-      fmt.println("TOKEN", token_text)
-
-      // if is_followed_by(lexer.data, COMMENT_OPEN, end_pos) && is_standalone_tag(token_text) {
-      //   fmt.println("STANDALONE")
-      //   lexer.standalone_tag = true
-      //   token_text = trim_right_whitespace(token_text)
-      // }
-
-      // Skip inserting a blank token if it is first and has no content.
-      // fmt.println("BLANK?", is_text_blank(token_text))
-      // if is_text_blank(token_text) && len(lexer.tokens) == 0 {
-      //   fmt.println("SKIP")
-      //   return
-      // }
-
-    // Remove all empty whitespace inside a valid tag so that we don't
-    // mess up our access of the data.
-    case .Tag, .TagLiteral, .TagLiteralTriple, .SectionOpen, .SectionClose:
-      token_text, _ = strings.remove_all(token_text, " ")
-
-    // Comment tags will not have their content output. Set to blank.
-    case .Comment:
-      token_text = ""
-  }
-
-  if start_pos != end_pos && len(token_text) > 0 {
-    token := Token{
-      type=token_type,
-      value=token_text,
-      start_pos=start_pos,
-      end_pos=end_pos,
-      line=lexer.line_cursor
-    }
-    append(&lexer.tokens, token)
-  }
-}
-
-/*
-  Used AFTER a new Token is inserted into the tokens dynamic
-  array. In the case of a .TagLiteral ('{{{...}}}'), we need
-  to advance the next start position by three instead of two,
-  to account for the additional brace.
-*/
-lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
-  cur_type := lexer.cur_token_type
-
-  // if cur_type == .TagLiteralTriple || new_type == .TagLiteralTriple {
-  //   lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
-  // } else if cur_type == .TagLiteral || cur_type == .Tag || cur_type == .SectionOpen || cur_type == .SectionClose {
-  // } else if cur_type == .Text {
-  //   lexer.last_token_start_pos = lexer.cursor + 1
-  // }
-
-  switch cur_type {
-    case .Tag, .TagLiteral, .SectionClose, .SectionOpen, .Comment, .CommentStandalone:
-      lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
-    case .TagLiteralTriple:
-      lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
-    case .Text:
-      lexer.last_token_start_pos = lexer.cursor
-  }
-
-  if cur_type == .Comment && lexer.standalone_tag {
-    chomping := true
-    for i := lexer.last_token_start_pos; i < len(lexer.data) && chomping; i += 1 {
-      if rune(lexer.data[i]) == '\n' || rune(lexer.data[i]) == '\r' {
-        lexer.last_token_start_pos += 1
-      } else {
-        chomping = false
-      }
-    }
-
-    lexer.standalone_tag = false
-  }
-
-  lexer.cur_token_type = new_type
 }
 
 /*
@@ -353,18 +231,67 @@ lexer_peek :: proc(lexer: ^Lexer, forward := 1) -> (rune) {
   return peeked
 }
 
-parse :: proc(lex: ^Lexer) -> (ok: bool) {
-  is_newline: bool
+/*
+  Used AFTER a new Token is inserted into the tokens dynamic
+  array. In the case of a .TagLiteral ('{{{...}}}'), we need
+  to advance the next start position by three instead of two,
+  to account for the additional brace.
+*/
+lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
+  cur_type := lexer.cur_token_type
 
+  if new_type == .TagLiteralTriple || cur_type == .TagLiteralTriple {
+    lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
+  } else {
+    switch cur_type {
+    case .Text:
+      lexer.last_token_start_pos = lexer.cursor + len(STANDARD_OPEN)
+    case .Newline:
+      lexer.last_token_start_pos = lexer.cursor + 1
+    case .Tag, .TagLiteral, .SectionClose, .SectionOpen, .Comment:
+      lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
+    case .TagLiteralTriple, .Unknown, .EOF:
+    }
+  }
+
+  lexer.cur_token_type = new_type
+}
+
+/*
+  Adds a new token to our list.
+*/
+append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
+  start_pos := lexer.last_token_start_pos
+  end_pos := lexer.cursor
+
+  // NOTE: I don't think we should need to allocate anything here.
+  // token_text := strings.clone(lexer.data[start_pos:end_pos], allocator=context.temp_allocator)
+  token_text := lexer.data[start_pos:end_pos]
+
+  #partial switch token_type {
+  case .Newline:
+    end_pos += 1
+    token_text = "\n"
+  case .Tag, .TagLiteral, .TagLiteralTriple, .SectionOpen, .SectionClose:
+    // Remove all empty whitespace inside a valid tag so that we don't
+    // mess up our access of the data.
+    token_text, _ = strings.remove_all(token_text, " ")
+  }
+
+  if start_pos != end_pos && len(token_text) > 0 {
+    token := Token{
+      type=token_type,
+      value=token_text,
+      pos=Pos{start_pos, end_pos, lexer.line}
+    }
+    append(&lexer.tokens, token)
+  }
+}
+
+
+parse :: proc(lex: ^Lexer) -> (ok: bool) {
   for ch, i in lex.data {
     lex.cursor = i
-
-    if ch == '\n' {
-      lex.line_cursor += 1
-      is_newline = true
-    } else {
-      is_newline = false
-    }
 
     switch {
       case ch == TAG_START:
@@ -374,43 +301,44 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
     }
 
     switch {
-      // TODO: Fix. Always break-up newlines in text into two tokens.
-      case is_newline && lex.cur_token_type == .Text:
-        fmt.println("NEWLINE")
+    case ch == '\n':
+      append_token(lex, lex.cur_token_type)
+      lex.cur_token_type = .Newline
+      append_token(lex, .Newline)
+      lexer_reset_token(lex, .Text)
+      lex.line += 1
+    case ch == TAG_START && lexer_peek(lex) == TAG_START && lexer_peek(lex, 2) == TAG_START:
+      // If we were processing text and hit an opening brace '{',
+      // then create that text token and flag that we are heading
+      // inside a brace now.
+      if lex.cur_token_type == .Text {
         append_token(lex, TokenType.Text)
+        lexer_reset_token(lex, .TagLiteralTriple)
+      }
+    case ch == TAG_START && lexer_peek(lex) == TAG_START:
+      // If we were processing text and hit an opening brace '{',
+      // then create that text token and flag that we are heading
+      // inside a brace now.
+      if lex.cur_token_type == .Text {
+        append_token(lex, TokenType.Text)
+        lexer_reset_token(lex, .Tag)
+      }
+    case ch == TAG_END:
+      // If we hit the end of a tag and are not in a text tag,
+      // create a new tag. If in text and we came across a random
+      // '}' rune, don't do anything.
+      if lexer_tag_stack_len(lex) > 0 && lex.cur_token_type != .Text {
+        append_token(lex, lex.cur_token_type)
         lexer_reset_token(lex, .Text)
-      case ch == TAG_START && lexer_peek(lex) == TAG_START && lexer_peek(lex, 2) == TAG_START:
-        // If we were processing text and hit an opening brace '{',
-        // then create that text token and flag that we are heading
-        // inside a brace now.
-        if lex.cur_token_type == .Text {
-          append_token(lex, TokenType.Text)
-          lexer_reset_token(lex, .TagLiteralTriple)
-        }
-      case ch == TAG_START && lexer_peek(lex) == TAG_START:
-        // If we were processing text and hit an opening brace '{',
-        // then create that text token and flag that we are heading
-        // inside a brace now.
-        if lex.cur_token_type == .Text {
-          append_token(lex, TokenType.Text)
-          lexer_reset_token(lex, .Tag)
-        }
-      case ch == TAG_END:
-        // If we hit the end of a tag and are not in a text tag,
-        // create a new tag. If in text and we came across a random
-        // '}' rune, don't do anything.
-        if lexer_tag_stack_len(lex) > 0 && lex.cur_token_type != .Text {
-          append_token(lex, lex.cur_token_type)
-          lexer_reset_token(lex, .Text)
-        }
-      case ch == SECTION_START && lexer_peek_brace(lex) == TAG_START:
-        lexer_update_token(lex, .SectionOpen)
-      case ch == SECTION_END && lexer_peek_brace(lex) == TAG_START:
-        lexer_update_token(lex, .SectionClose)
-      case ch == LITERAL && lexer_peek_brace(lex) == TAG_START:
-        lexer_update_token(lex, .TagLiteral)
-      case ch == COMMENT && lexer_peek_brace(lex) == TAG_START:
-        lexer_update_token(lex, .Comment)
+      }
+    case ch == SECTION_START && lexer_peek_brace(lex) == TAG_START:
+      lexer_update_token(lex, .SectionOpen)
+    case ch == SECTION_END && lexer_peek_brace(lex) == TAG_START:
+      lexer_update_token(lex, .SectionClose)
+    case ch == LITERAL && lexer_peek_brace(lex) == TAG_START:
+      lexer_update_token(lex, .TagLiteral)
+    case ch == COMMENT && lexer_peek_brace(lex) == TAG_START:
+      lexer_update_token(lex, .Comment)
     }
   }
 
@@ -443,7 +371,6 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
 */
 @(private) _whitespace := map[rune]bool{
   ' ' = true,
-  '\n' = true,
   '\t' = true,
   '\r' = true
 }
@@ -467,7 +394,6 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   // The root stack is always valid.
   current_stack := tmpl.context_stack[0]
 
-  // TODO: This is the bug...
   if current_stack.label == "ROOT" {
     return true
   }
@@ -475,23 +401,23 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   data: Data
 
   #partial switch token.type {
-    case .SectionClose:
-      return true
-    case .Comment:
-      return true
-    case .SectionOpen:
-      data = template_stack_extract(tmpl, token, false)
-    case:
-      data = tmpl.context_stack[0].data
+  case .SectionClose:
+    return true
+  case .Comment:
+    return true
+  case .SectionOpen:
+    data = template_stack_extract(tmpl, token, false)
+  case:
+    data = tmpl.context_stack[0].data
   }
 
   switch _data in data {
-    case Map:
-      return len(_data) > 0
-    case List:
-      return len(_data) > 0 
-    case string:
-      return !_falsey_context[_data]
+  case Map:
+    return len(_data) > 0
+  case List:
+    return len(_data) > 0 
+  case string:
+    return !_falsey_context[_data]
   }
 
   return false
@@ -576,7 +502,8 @@ template_print_stack :: proc(tmpl: ^Template) {
     .SectionClose "countries"
   .SectionClose /repo
 */
-template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: int) {
+template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, index: int) {
+  data_id := token.value
   ids := strings.split(data_id, ".", allocator=context.temp_allocator)
 
   // New stack entries always need to resolve against the current top
@@ -595,49 +522,49 @@ template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: i
   }
 
   switch _data in to_add {
-    case Map:
-      stack_entry := ContextStackEntry{data=to_add, label=data_id}
-      inject_at(&tmpl.context_stack, 0, stack_entry)
-    case List:
-      // template_pop_from_context_stack(tmpl)
-      start_chunk := index + 1
-      end_chunk := template_find_section_close_tag_index(tmpl, data_id, index)
-      chunk := slice.clone_to_dynamic(tmpl.lexer.tokens[start_chunk:end_chunk])
+  case Map:
+    stack_entry := ContextStackEntry{data=to_add, label=data_id}
+    inject_at(&tmpl.context_stack, 0, stack_entry)
+  case List:
+    // template_pop_from_context_stack(tmpl)
+    start_chunk := index + 1
+    end_chunk := template_find_section_close_tag_index(tmpl, data_id, index)
+    chunk := slice.clone_to_dynamic(tmpl.lexer.tokens[start_chunk:end_chunk])
 
-      // Remove the original chunk from the token list.
-      for _ in start_chunk..<end_chunk {
-        ordered_remove(&tmpl.lexer.tokens, start_chunk)
-      }
+    // Remove the original chunk from the token list.
+    for _ in start_chunk..<end_chunk {
+      ordered_remove(&tmpl.lexer.tokens, start_chunk)
+    }
 
-      // Add the "loop" chunk N-times to the token list.
-      // ordered_remove(&tmpl.context_stack, 0)
-      insert_length := 0
-      for i in 0..<len(_data) {
-        // When performing list-substitution, add a .SectionClose to pop off
-        // the top item IF it is NOT a list items. List items will need to
-        // undergo substitution and should not be discarded.
-        #partial switch _d in _data[i] {
-          case Map, string:
-            inject_at(&tmpl.lexer.tokens, start_chunk, Token{.SectionClose, "TEMP LIST", -1, -1, -1})
-            insert_length += 1
-        }
-        #reverse for t in chunk {
-          inject_at(&tmpl.lexer.tokens, start_chunk, t)
+    // Add the "loop" chunk N-times to the token list.
+    // ordered_remove(&tmpl.context_stack, 0)
+    insert_length := 0
+    for i in 0..<len(_data) {
+      // When performing list-substitution, add a .SectionClose to pop off
+      // the top item IF it is NOT a list items. List items will need to
+      // undergo substitution and should not be discarded.
+      #partial switch _d in _data[i] {
+        case Map, string:
+          inject_at(
+            &tmpl.lexer.tokens,
+            start_chunk,
+            Token{.SectionClose, "TEMP LIST", Pos{-1, -1, token.pos.line}}
+          )
           insert_length += 1
-        }
-
-        // Add the loop data to the context_stack in reverse order of the list,
-        // so that the first entry is at the top.
-        stack_entry := ContextStackEntry{data=_data[len(_data)-1-i], label="TEMP LIST"}
-        inject_at(&tmpl.context_stack, 0, stack_entry)
       }
-    case string:
-      // stack_entry := ContextStackEntry{
-      //   data=Map{data_id = to_add},
-      //   label=data_id
-      // }
-      stack_entry := ContextStackEntry{data=to_add, label=data_id}
+      #reverse for t in chunk {
+        inject_at(&tmpl.lexer.tokens, start_chunk, t)
+        insert_length += 1
+      }
+
+      // Add the loop data to the context_stack in reverse order of the list,
+      // so that the first entry is at the top.
+      stack_entry := ContextStackEntry{data=_data[len(_data)-1-i], label="TEMP LIST"}
       inject_at(&tmpl.context_stack, 0, stack_entry)
+    }
+  case string:
+    stack_entry := ContextStackEntry{data=to_add, label=data_id}
+    inject_at(&tmpl.context_stack, 0, stack_entry)
   }
 }
 
@@ -670,231 +597,121 @@ template_print_tokens :: proc(tmpl: ^Template) {
   }
 }
 
-token_standalone :: proc(lexer: ^Lexer, i: int) {
-  tokens := lexer.tokens
-  cur := tokens[i]
-  prev_i := i - 1
-  next_i := i + 1
-
-  prev: Token
-  next: Token
-
-  if prev_i >= 0 && tokens[prev_i].type == .Text {
-    prev = tokens[prev_i]
-  }
-
-  if next_i < len(tokens) && tokens[next_i].type == .Text {
-    next = tokens[next_i]
-  }
-
-  fmt.println("token_standalone", prev, next)
-
-  if prev.type == .Unknown && next.type != .Unknown {
-    if starts_with_newline(next.value) {
-      fmt.println("\nTRIMMING PREFIX FROM NEXT TOKEN")
-      next.value = trim_whitespace_prefix(next.value, true)
-      lexer.tokens[next_i] = next
-    }
-  } else if prev.type != .Unknown && next.type == .Unknown {
-    fmt.println("\nTRIMMING SUFFIX FROM PREV TOKEN")
-    if ends_with_newline(prev.value) {
-      prev.value = trim_whitespace_suffix(prev.value, true)
-      lexer.tokens[prev_i] = prev
-    }
-  } else if prev.type != .Unknown && next.type != .Unknown {
-    fmt.println("\nTRIMMING BOTH")
-    // TODO: Check if the tag is on its own line with only whitespace on it.
-    if ends_with_newline(prev.value) && starts_with_newline(next.value) {
-      prev.value = trim_whitespace_suffix(prev.value)
-      lexer.tokens[prev_i] = prev
-      next.value = trim_whitespace_prefix(next.value)
-      lexer.tokens[next_i] = next
+tokens_on_line :: proc(lexer: Lexer, line: int) -> (tokens: [dynamic]Token) {
+  for t in lexer.tokens {
+    if t.pos.line == line {
+      append(&tokens, t)
     }
   }
+
+  return tokens
 }
 
-// TODO: Finish.
-// on_blank_line :: proc(token: Token) -> (bool) {
-//   on_line: [dynamic]Token
-//   line := token.line
-//   for t in lexer.tokens {
-//     if t == token {
-//       continue
-//     }
-//   }
-// }
-
-// TODO: Have this return the index of the newline as well.
-ends_with_newline :: proc(s: string) -> (seen: bool) {
-  #reverse for r in s {
-    if !_whitespace[r] {
-      break
-    }
-
-    if r == '\n' {
-      seen = true
-      break
+tokens_blank :: proc(tokens: []Token) -> (bool) {
+  for t in tokens {
+    #partial switch t.type {
+    case .Text:
+      if !is_text_blank(t.value) {
+        return false
+      }
     }
   }
 
-  return seen
+  return true
 }
 
-// TODO: Have this return the index of the newline as well.
-starts_with_newline :: proc(s: string) -> (seen: bool) {
-  for r in s {
-    if !_whitespace[r] {
-      break
-    }
+skip_newline :: proc(tokens: []Token) -> (bool) {
+  // if len(tokens) == 1 {
+  //   return false
+  // }
 
-    if r == '\n' {
-      seen = true
-      break
+  for t in tokens {
+    #partial switch t.type {
+    case .Text:
+      if !is_text_blank(t.value) {
+        return false
+      }
+    case .Tag, .TagLiteral, .TagLiteralTriple:
+      return false
     }
   }
 
-  return seen
+  return true
 }
 
-trim_whitespace_suffix :: proc(s: string, include_newline := false) -> (string) {
-  if !ends_with_newline(s) {
-    return s
-  }
-
-  newline_index := -1
-  #reverse for r, i in s {
-    if r == '\n' {
-      newline_index = i
-      break
+// If we are rendering a .Text tag, we should NOT render it if it is
+// just made up of whitespace on a Section line.
+is_standalone_tag_line :: proc(tokens: []Token) -> (bool) {
+  standalone_tag_count := 0
+  for t in tokens {
+    #partial switch t.type {
+    case .Text:
+      if !is_text_blank(t.value) {
+        return false
+      }
+    case .SectionOpen, .SectionClose, .Comment:
+      standalone_tag_count += 1
     }
   }
 
-  if newline_index == -1 {
-    return s
-  }
-
-  if newline_index == 0 && include_newline {
-    return ""
-  }
-
-  fmt.println("BEFORE SUFFIX", s, "DONE")
-  fmt.println("AFTER SUFFIX:", s[:newline_index], "DONE")
-
-  if include_newline {
-    return s[:newline_index-1]
-  } else {
-    return s[:newline_index]
-  }
-
-  // THIS WILL TRIM ALL THE WHITESPACE __AFTER__
-  // THE NEWLINE
+  // If we have gotten to the end, that means all the .Text
+  // tags on this line are blank. If we also only have a single
+  // section or comment tag, that means that tag is standalone.
+  return standalone_tag_count == 1
 }
 
-trim_whitespace_prefix :: proc(s: string, include_newline := false) -> (string) {
-  if !starts_with_newline(s) {
-    fmt.println("HERE")
-    return s
-  }
+// When we have a newline that creates a standalone tag, we should NOT
+// render it.
+token_standalone2 :: proc(lexer: Lexer, newline_token: Token) -> (bool) {
+  line := newline_token.pos.line
+  on_line := tokens_on_line(lexer, newline_token.pos.line)
+  fmt.println("ON LINE", on_line, "IS BLANK?", tokens_blank(on_line[:]))
 
-  newline_index := -1
-  for r, i in s {
-    if r == '\n' {
-      newline_index = i
-      break
-    }
-  }
-
-  fmt.println("NEWLINE INDEX", newline_index)
-
-  if newline_index == -1 {
-    return s
-  }
-
-  if newline_index == 0 && len(s) == 1 && include_newline {
-    return ""
-  }
-
-  fmt.println("BEFORE PREFIX", s, "DONE")
-  fmt.println("AFTER PREFIX:", s[newline_index:], "DONE")
-
-  if include_newline {
-    return s[newline_index+1:]
-  } else {
-    return s[newline_index:]
-  }
-
-  // THIS WILL TRIM ALL THE WHITESPACE UP TO AND
-  // __INCLUDING__ THE NEWLINE
-  // THE NEWLINE
+  return false
 }
 
-template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
+template_process3 :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   str: [dynamic]string
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
   inject_at(&tmpl.context_stack, 0, root)
 
-  fmt.println("TOKENS BEFORE")
-  template_print_tokens(tmpl)
-
-
-  // First iterate and remove newlines as necessary for
-  // standalone tags.
-  // for token, i in tmpl.lexer.tokens {
-  //   #partial switch token.type {
-  //     case .SectionOpen:
-  //       token_standalone(&tmpl.lexer, i)
-  //     case .SectionClose:
-  //       token_standalone(&tmpl.lexer, i)
-  //     case .Comment:
-  //       token_standalone(&tmpl.lexer, i)
-  //   }
-  // }
-
   for token, i in tmpl.lexer.tokens {
-    tmpl.pos = i
+    on_line := tokens_on_line(tmpl.lexer, token.pos.line)[:]
 
-    // if !token_valid_in_template_context(tmpl, token) {
-    //   continue
-    // }
-
+    // fmt.println(token, "VALID?", token_valid_in_template_context(tmpl, token))
     switch token.type {
-      case .Text:
-        if token_valid_in_template_context(tmpl, token) {
-          append(&str, token.value)
-        }
-      case .Tag:
-        // token_standalone(&tmpl.lexer, i)
-        if token_valid_in_template_context(tmpl, token) {
-          append(&str, template_stack_extract(tmpl, token, true))
-        }
-      case .TagLiteral:
-        // token_standalone(&tmpl.lexer, i)
-        if token_valid_in_template_context(tmpl, token) {
-          append(&str, template_stack_extract(tmpl, token, false))
-        }
-      case .TagLiteralTriple:
-        // token_standalone(&tmpl.lexer, i)
-        if token_valid_in_template_context(tmpl, token) {
-          append(&str, template_stack_extract(tmpl, token, false))
-        }
-      case .SectionOpen:
-        // token_standalone(&tmpl.lexer, i)
-        template_add_to_context_stack(tmpl, token.value, i)
-        template_print_stack(tmpl)
-      case .SectionClose:
-        // token_standalone(&tmpl.lexer, i)
-        template_pop_from_context_stack(tmpl)
-      case .Comment:
-        // token_standalone(&tmpl.lexer, i)
-      // Do nothing for these cases.
-      case .CommentStandalone:
-      case .Unknown:
-      case .EOF:
+    case .Newline:
+      fmt.println("SKIP NEWLINE?", skip_newline(on_line))
+      if token_valid_in_template_context(tmpl, token) && !skip_newline(on_line) {
+        append(&str, token.value)
+      }
+    case .Text:
+      fmt.println("TEXT")
+      if token_valid_in_template_context(tmpl, token) && !is_standalone_tag_line(on_line) {
+        append(&str, token.value)
+      }
+    case .Tag:
+      if token_valid_in_template_context(tmpl, token) {
+        append(&str, template_stack_extract(tmpl, token, true))
+      }
+    case .TagLiteral:
+      if token_valid_in_template_context(tmpl, token) {
+        append(&str, template_stack_extract(tmpl, token, false))
+      }
+    case .TagLiteralTriple:
+      if token_valid_in_template_context(tmpl, token) {
+        append(&str, template_stack_extract(tmpl, token, false))
+      }
+    case .SectionOpen:
+      fmt.println("OPENING")
+      template_add_to_context_stack(tmpl, token, i)
+      template_print_stack(tmpl)
+    case .SectionClose:
+      template_pop_from_context_stack(tmpl)
+    case .Comment, .Unknown, .EOF:
     }
   }
 
-  // template_print_stack(tmpl)
-  fmt.println("TOKENS BEFORE")
   template_print_tokens(tmpl)
 
   output = strings.concatenate(str[:])
@@ -911,7 +728,8 @@ render :: proc(input: string, data: Data) -> (string, bool) {
   }
 
   template := Template{lexer=lexer, data=data, pos=0}
-  return template_process(&template)
+  // return template_process(&template)
+  return template_process3(&template)
 }
 
 _main :: proc() -> (err: Error) {
@@ -1019,36 +837,21 @@ _main :: proc() -> (err: Error) {
   // fmt.println("")
 
   // input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{#d}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{#five}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{/five}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{/d}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
-  // input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
-  // data := Map {
-  //   "a" = Map {
-  //     "one" = "1"
-  //   },
-  //   "b" = Map {
-  //     "two" = "2"
-  //   },
-  //   "c" = Map {
-  //     "three" = "3",
-  //     "d" = Map {
-  //       "four" = "4",
-  //       "five" = "5"
-  //     }
-  //   }
-  // }
-
-  // fmt.printf("====== RENDERING\n")
-  // fmt.printf("Input : '%v'\n", input)
-  // fmt.printf("Data : '%v'\n", data)
-  // output, ok := render(input, data)
-  // if !ok {
-  //   return .Something
-  // }
-  // fmt.printf("Output: %v\n", output)
-  // fmt.println("")
-
-  input := "  {{#boolean}}\n#{{/boolean}}\n/"
+  input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
   data := Map {
-    "boolean" = "true"
+    "a" = Map {
+      "one" = "1"
+    },
+    "b" = Map {
+      "two" = "2"
+    },
+    "c" = Map {
+      "three" = "3",
+      "d" = Map {
+        "four" = "4",
+        "five" = "5"
+      }
+    }
   }
 
   fmt.printf("====== RENDERING\n")
@@ -1060,6 +863,21 @@ _main :: proc() -> (err: Error) {
   }
   fmt.printf("Output: %v\n", output)
   fmt.println("")
+
+  // input := "  {{#boolean}}\n#{{/boolean}}\n/"
+  // data := Map {
+  //   "boolean" = "true"
+  // }
+
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // fmt.printf("Data : '%v'\n", data)
+  // output, ok := render(input, data)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
 
   // input = "| A {{#bool}}B {{#bool}}C{{/bool}} D{{/bool}} E |"
   // data = Map {
