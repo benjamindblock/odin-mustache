@@ -301,7 +301,8 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
     }
 
     switch {
-    case ch == '\n':
+    // Support multi-line comments.
+    case ch == '\n' && lex.cur_token_type != .Comment:
       append_token(lex, lex.cur_token_type)
       lex.cur_token_type = .Newline
       append_token(lex, .Newline)
@@ -587,13 +588,9 @@ template_pop_from_context_stack :: proc(tmpl: ^Template) {
   }
 }
 
-template_print_tokens :: proc(tmpl: ^Template) {
-  for t, i in tmpl.lexer.tokens {
-    if i == tmpl.pos {
-      fmt.println(" -->", t)
-    } else {
-      fmt.println("    ", t)
-    }
+lexer_print_tokens :: proc(lexer: Lexer) {
+  for t, i in lexer.tokens {
+    fmt.println("    ", t)
   }
 }
 
@@ -660,16 +657,6 @@ is_standalone_tag_line :: proc(tokens: []Token) -> (bool) {
   return standalone_tag_count == 1
 }
 
-// When we have a newline that creates a standalone tag, we should NOT
-// render it.
-token_standalone2 :: proc(lexer: Lexer, newline_token: Token) -> (bool) {
-  line := newline_token.pos.line
-  on_line := tokens_on_line(lexer, newline_token.pos.line)
-  fmt.println("ON LINE", on_line, "IS BLANK?", tokens_blank(on_line[:]))
-
-  return false
-}
-
 template_process3 :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   str: [dynamic]string
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
@@ -678,7 +665,6 @@ template_process3 :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   for token, i in tmpl.lexer.tokens {
     on_line := tokens_on_line(tmpl.lexer, token.pos.line)[:]
 
-    // fmt.println(token, "VALID?", token_valid_in_template_context(tmpl, token))
     switch token.type {
     case .Newline:
       fmt.println("SKIP NEWLINE?", skip_newline(on_line))
@@ -686,7 +672,6 @@ template_process3 :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
         append(&str, token.value)
       }
     case .Text:
-      fmt.println("TEXT")
       if token_valid_in_template_context(tmpl, token) && !is_standalone_tag_line(on_line) {
         append(&str, token.value)
       }
@@ -703,7 +688,6 @@ template_process3 :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
         append(&str, template_stack_extract(tmpl, token, false))
       }
     case .SectionOpen:
-      fmt.println("OPENING")
       template_add_to_context_stack(tmpl, token, i)
       template_print_stack(tmpl)
     case .SectionClose:
@@ -712,7 +696,8 @@ template_process3 :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     }
   }
 
-  template_print_tokens(tmpl)
+  fmt.println("Tokens AFTER template_process3")
+  lexer_print_tokens(tmpl.lexer)
 
   output = strings.concatenate(str[:])
   return output, true
@@ -837,22 +822,35 @@ _main :: proc() -> (err: Error) {
   // fmt.println("")
 
   // input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{#d}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{#five}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{/five}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{/d}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
-  input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
-  data := Map {
-    "a" = Map {
-      "one" = "1"
-    },
-    "b" = Map {
-      "two" = "2"
-    },
-    "c" = Map {
-      "three" = "3",
-      "d" = Map {
-        "four" = "4",
-        "five" = "5"
-      }
-    }
-  }
+  // input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
+  // data := Map {
+  //   "a" = Map {
+  //     "one" = "1"
+  //   },
+  //   "b" = Map {
+  //     "two" = "2"
+  //   },
+  //   "c" = Map {
+  //     "three" = "3",
+  //     "d" = Map {
+  //       "four" = "4",
+  //       "five" = "5"
+  //     }
+  //   }
+  // }
+
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // fmt.printf("Data : '%v'\n", data)
+  // output, ok := render(input, data)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
+
+  input := "12345{{!\n  This is a\n  multi-line comment...\n}}67890\n"
+  data := Map {}
 
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
