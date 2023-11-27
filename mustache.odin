@@ -15,6 +15,7 @@ SECTION_START :: '#'
 SECTION_END :: '/'
 LITERAL :: '&'
 COMMENT :: '!'
+SECTION_INVERTED:: '^'
 
 /*
   Mustache tag descriptions needed for lexing.
@@ -24,6 +25,7 @@ STANDARD_CLOSE :: "}}"
 LITERAL_CLOSE :: "}}}"
 COMMENT_OPEN :: "{{!"
 SECTION_OPEN :: "{{#"
+INVERTED_OPEN :: "{{^"
 SECTION_CLOSE :: "{{/"
 
 /*
@@ -49,6 +51,7 @@ Token :: struct {
 TokenType :: enum {
   Text,
   Tag,
+  SectionOpenInverted,
   TagLiteral,
   TagLiteralTriple,
   SectionOpen,
@@ -238,7 +241,7 @@ lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
       lexer.last_token_start_pos = lexer.cursor + len(STANDARD_OPEN)
     case .Newline:
       lexer.last_token_start_pos = lexer.cursor + 1
-    case .Tag, .TagLiteral, .SectionClose, .SectionOpen, .Comment:
+    case .Tag, .SectionOpenInverted, .TagLiteral, .SectionClose, .SectionOpen, .Comment:
       lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
     case .TagLiteralTriple, .EOF:
     }
@@ -323,6 +326,8 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
       }
     case ch == SECTION_START && lexer_peek_brace(lex) == TAG_START:
       lexer_update_token(lex, .SectionOpen)
+    case ch == SECTION_INVERTED && lexer_peek_brace(lex) == TAG_START:
+      lexer_update_token(lex, .SectionOpenInverted)
     case ch == SECTION_END && lexer_peek_brace(lex) == TAG_START:
       lexer_update_token(lex, .SectionClose)
     case ch == LITERAL && lexer_peek_brace(lex) == TAG_START:
@@ -382,26 +387,13 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
 */
 token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool) {
   // The root stack is always valid.
-  current_stack := tmpl.context_stack[0]
+  stack_entry := tmpl.context_stack[0]
 
-  if current_stack.label == "ROOT" {
+  if stack_entry.label == "ROOT" {
     return true
   }
 
-  data: Data
-
-  #partial switch token.type {
-  case .SectionClose:
-    return true
-  case .Comment:
-    return true
-  case .SectionOpen:
-    data = template_stack_extract(tmpl, token, false)
-  case:
-    data = tmpl.context_stack[0].data
-  }
-
-  switch _data in data {
+  switch _data in stack_entry.data {
   case Map:
     return len(_data) > 0
   case List:
@@ -511,6 +503,12 @@ template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, index: int)
     to_add = "false"
   }
 
+  if token.type == .SectionOpenInverted {
+    to_add = invert_data(to_add)
+    template_print_stack(tmpl)
+    fmt.println("AD TO STACK", to_add)
+  }
+
   switch _data in to_add {
   case Map:
     stack_entry := ContextStackEntry{data=to_add, label=data_id}
@@ -553,6 +551,34 @@ template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, index: int)
     stack_entry := ContextStackEntry{data=to_add, label=data_id}
     inject_at(&tmpl.context_stack, 0, stack_entry)
   }
+}
+
+invert_data :: proc(data: Data) -> (Data) {
+  inverted := data
+
+  switch _data in data {
+  case Map:
+    fmt.println("INVERTING", _data)
+    if len(_data) > 0 {
+      inverted = "false"
+    } else {
+      inverted = "true"
+    }
+  case List:
+    if len(_data) > 0 {
+      inverted = "false"
+    } else {
+      inverted = "true"
+    }
+  case string:
+    if !_falsey_context[_data] {
+      inverted = "false"
+    } else {
+      inverted = "true"
+    }
+  }
+
+  return inverted
 }
 
 template_find_section_close_tag_index :: proc(tmpl: ^Template, label: string, index: int) -> (int) {
@@ -618,7 +644,7 @@ is_standalone_tag_line :: proc(tokens: []Token) -> (bool) {
       if !is_text_blank(t.value) {
         return false
       }
-    case .SectionOpen, .SectionClose, .Comment:
+    case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment:
       standalone_tag_count += 1
     }
   }
@@ -666,7 +692,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     switch token.type {
     case .Newline, .Text, .Tag, .TagLiteral, .TagLiteralTriple:
       append(&str, token_content(tmpl, token))
-    case .SectionOpen:
+    case .SectionOpen, .SectionOpenInverted:
       template_add_to_context_stack(tmpl, token, i)
     case .SectionClose:
       template_pop_from_context_stack(tmpl)
@@ -674,6 +700,8 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     case .Comment, .EOF:
     }
   }
+
+  lexer_print_tokens(tmpl.lexer)
 
   output = strings.concatenate(str[:])
   return output, true
