@@ -59,17 +59,19 @@ Token :: struct {
   type: TokenType,
   value: string,
   start_pos: int,
-  end_pos: int
+  end_pos: int,
+  line: int
 }
 
 Lexer :: struct {
   data: string,
   cursor: int,
+  line_cursor: int,
   tokens: [dynamic]Token,
   cur_token_type: TokenType,
   last_token_start_pos: int,
   tag_stack: [dynamic]rune,
-  standalone_tag: bool
+  standalone_tag: bool,
 }
 
 // All data provided will either be:
@@ -168,8 +170,18 @@ trim_decimal_string :: proc(s: string) -> string {
 }
 
 // Checks if a rune is plain whitespace.
-is_whitespace :: proc(r: rune) -> (res: bool) {
+is_whitespace :: proc(r: rune) -> (bool) {
   return r == ' '
+}
+
+is_text_blank :: proc(s: string) -> (res: bool) {
+  for r in s {
+    if !is_whitespace(r) {
+      return false
+    }
+  }
+
+  return true
 }
 
 // Trims all whitespace to the right of a string.
@@ -226,11 +238,19 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
     // A text tag will be added as a Token without any modifications.
     case .Text:
       token_text = lexer.data[start_pos:end_pos]
+      fmt.println("TOKEN", token_text)
 
       // if is_followed_by(lexer.data, COMMENT_OPEN, end_pos) && is_standalone_tag(token_text) {
       //   fmt.println("STANDALONE")
       //   lexer.standalone_tag = true
       //   token_text = trim_right_whitespace(token_text)
+      // }
+
+      // Skip inserting a blank token if it is first and has no content.
+      // fmt.println("BLANK?", is_text_blank(token_text))
+      // if is_text_blank(token_text) && len(lexer.tokens) == 0 {
+      //   fmt.println("SKIP")
+      //   return
       // }
 
     // Remove all empty whitespace inside a valid tag so that we don't
@@ -248,7 +268,8 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
       type=token_type,
       value=token_text,
       start_pos=start_pos,
-      end_pos=end_pos
+      end_pos=end_pos,
+      line=lexer.line_cursor
     }
     append(&lexer.tokens, token)
   }
@@ -263,10 +284,20 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
 lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
   cur_type := lexer.cur_token_type
 
-  if cur_type == .TagLiteralTriple || new_type == .TagLiteralTriple {
-    lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
-  } else {
-    lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
+  // if cur_type == .TagLiteralTriple || new_type == .TagLiteralTriple {
+  //   lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
+  // } else if cur_type == .TagLiteral || cur_type == .Tag || cur_type == .SectionOpen || cur_type == .SectionClose {
+  // } else if cur_type == .Text {
+  //   lexer.last_token_start_pos = lexer.cursor + 1
+  // }
+
+  switch cur_type {
+    case .Tag, .TagLiteral, .SectionClose, .SectionOpen, .Comment, .CommentStandalone:
+      lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
+    case .TagLiteralTriple:
+      lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
+    case .Text:
+      lexer.last_token_start_pos = lexer.cursor
   }
 
   if cur_type == .Comment && lexer.standalone_tag {
@@ -323,8 +354,17 @@ lexer_peek :: proc(lexer: ^Lexer, forward := 1) -> (rune) {
 }
 
 parse :: proc(lex: ^Lexer) -> (ok: bool) {
+  is_newline: bool
+
   for ch, i in lex.data {
     lex.cursor = i
+
+    if ch == '\n' {
+      lex.line_cursor += 1
+      is_newline = true
+    } else {
+      is_newline = false
+    }
 
     switch {
       case ch == TAG_START:
@@ -334,6 +374,11 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
     }
 
     switch {
+      // TODO: Fix. Always break-up newlines in text into two tokens.
+      case is_newline && lex.cur_token_type == .Text:
+        fmt.println("NEWLINE")
+        append_token(lex, TokenType.Text)
+        lexer_reset_token(lex, .Text)
       case ch == TAG_START && lexer_peek(lex) == TAG_START && lexer_peek(lex, 2) == TAG_START:
         // If we were processing text and hit an opening brace '{',
         // then create that text token and flag that we are heading
@@ -573,7 +618,7 @@ template_add_to_context_stack :: proc(tmpl: ^Template, data_id: string, index: i
         // undergo substitution and should not be discarded.
         #partial switch _d in _data[i] {
           case Map, string:
-            inject_at(&tmpl.lexer.tokens, start_chunk, Token{.SectionClose, "TEMP LIST", 0, 0})
+            inject_at(&tmpl.lexer.tokens, start_chunk, Token{.SectionClose, "TEMP LIST", -1, -1, -1})
             insert_length += 1
         }
         #reverse for t in chunk {
@@ -658,6 +703,7 @@ token_standalone :: proc(lexer: ^Lexer, i: int) {
     }
   } else if prev.type != .Unknown && next.type != .Unknown {
     fmt.println("\nTRIMMING BOTH")
+    // TODO: Check if the tag is on its own line with only whitespace on it.
     if ends_with_newline(prev.value) && starts_with_newline(next.value) {
       prev.value = trim_whitespace_suffix(prev.value)
       lexer.tokens[prev_i] = prev
@@ -666,6 +712,17 @@ token_standalone :: proc(lexer: ^Lexer, i: int) {
     }
   }
 }
+
+// TODO: Finish.
+// on_blank_line :: proc(token: Token) -> (bool) {
+//   on_line: [dynamic]Token
+//   line := token.line
+//   for t in lexer.tokens {
+//     if t == token {
+//       continue
+//     }
+//   }
+// }
 
 // TODO: Have this return the index of the newline as well.
 ends_with_newline :: proc(s: string) -> (seen: bool) {
@@ -776,18 +833,22 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
   inject_at(&tmpl.context_stack, 0, root)
 
+  fmt.println("TOKENS BEFORE")
+  template_print_tokens(tmpl)
+
+
   // First iterate and remove newlines as necessary for
   // standalone tags.
-  for token, i in tmpl.lexer.tokens {
-    #partial switch token.type {
-      case .SectionOpen:
-        token_standalone(&tmpl.lexer, i)
-      case .SectionClose:
-        token_standalone(&tmpl.lexer, i)
-      case .Comment:
-        token_standalone(&tmpl.lexer, i)
-    }
-  }
+  // for token, i in tmpl.lexer.tokens {
+  //   #partial switch token.type {
+  //     case .SectionOpen:
+  //       token_standalone(&tmpl.lexer, i)
+  //     case .SectionClose:
+  //       token_standalone(&tmpl.lexer, i)
+  //     case .Comment:
+  //       token_standalone(&tmpl.lexer, i)
+  //   }
+  // }
 
   for token, i in tmpl.lexer.tokens {
     tmpl.pos = i
@@ -833,7 +894,8 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   }
 
   // template_print_stack(tmpl)
-  // template_print_tokens(tmpl)
+  fmt.println("TOKENS BEFORE")
+  template_print_tokens(tmpl)
 
   output = strings.concatenate(str[:])
   return output, true
@@ -957,21 +1019,36 @@ _main :: proc() -> (err: Error) {
   // fmt.println("")
 
   // input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{#d}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{#five}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{.}}6{{.}}{{four}}{{three}}{{two}}{{one}}\n{{one}}{{two}}{{three}}{{four}}{{five}}{{four}}{{three}}{{two}}{{one}}\n{{/five}}\n{{one}}{{two}}{{three}}{{four}}{{three}}{{two}}{{one}}\n{{/d}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
-  input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
+  // input := "{{#a}}\n{{one}}\n{{#b}}\n{{one}}{{two}}{{one}}\n{{#c}}\n{{one}}{{two}}{{three}}{{two}}{{one}}\n{{/c}}\n{{one}}{{two}}{{one}}\n{{/b}}\n{{one}}\n{{/a}}\n"
+  // data := Map {
+  //   "a" = Map {
+  //     "one" = "1"
+  //   },
+  //   "b" = Map {
+  //     "two" = "2"
+  //   },
+  //   "c" = Map {
+  //     "three" = "3",
+  //     "d" = Map {
+  //       "four" = "4",
+  //       "five" = "5"
+  //     }
+  //   }
+  // }
+
+  // fmt.printf("====== RENDERING\n")
+  // fmt.printf("Input : '%v'\n", input)
+  // fmt.printf("Data : '%v'\n", data)
+  // output, ok := render(input, data)
+  // if !ok {
+  //   return .Something
+  // }
+  // fmt.printf("Output: %v\n", output)
+  // fmt.println("")
+
+  input := "  {{#boolean}}\n#{{/boolean}}\n/"
   data := Map {
-    "a" = Map {
-      "one" = "1"
-    },
-    "b" = Map {
-      "two" = "2"
-    },
-    "c" = Map {
-      "three" = "3",
-      "d" = Map {
-        "four" = "4",
-        "five" = "5"
-      }
-    }
+    "boolean" = "true"
   }
 
   fmt.printf("====== RENDERING\n")
