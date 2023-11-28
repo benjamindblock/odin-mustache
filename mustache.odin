@@ -16,6 +16,7 @@ SECTION_END :: '/'
 LITERAL :: '&'
 COMMENT :: '!'
 SECTION_INVERTED:: '^'
+PARTIAL:: '>'
 
 /*
   Mustache tag descriptions needed for lexing.
@@ -29,6 +30,7 @@ INVERTED_OPEN :: "{{^"
 SECTION_CLOSE :: "{{/"
 DELIM_OPEN :: "{{="
 DELIM_CLOSE :: "=}}"
+PARTIAL_OPEN :: "{{>"
 
 /*
   Special characters that will receive HTML-escaping
@@ -59,6 +61,7 @@ TokenType :: enum {
   SectionOpen,
   SectionClose,
   Comment,
+  Partial,
   Newline,
   EOF // The last token parsed, caller should not call again.
 }
@@ -95,6 +98,7 @@ Data :: union {
 Template :: struct {
   lexer: Lexer,
   data: Data,
+  partials: Data,
   context_stack: [dynamic]ContextStackEntry
 }
 
@@ -253,7 +257,7 @@ lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
       lexer.last_token_start_pos = lexer.cursor + len(STANDARD_OPEN)
     case .Newline:
       lexer.last_token_start_pos = lexer.cursor + 1
-    case .Tag, .SectionOpenInverted, .TagLiteral, .SectionClose, .SectionOpen, .Comment:
+    case .Tag, .SectionOpenInverted, .TagLiteral, .SectionClose, .SectionOpen, .Comment, .Partial:
       lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
     case .TagLiteralTriple, .EOF:
     }
@@ -268,16 +272,13 @@ lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
 append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
   start_pos := lexer.last_token_start_pos
   end_pos := lexer.cursor
-
-  // NOTE: I don't think we should need to allocate anything here.
-  // token_text := strings.clone(lexer.data[start_pos:end_pos], allocator=context.temp_allocator)
   token_text := lexer.data[start_pos:end_pos]
 
   #partial switch token_type {
   case .Newline:
     end_pos += 1
     token_text = "\n"
-  case .Tag, .TagLiteral, .TagLiteralTriple, .SectionOpen, .SectionClose:
+  case .Tag, .TagLiteral, .TagLiteralTriple, .SectionOpen, .SectionClose, .Partial:
     // Remove all empty whitespace inside a valid tag so that we don't
     // mess up our access of the data.
     token_text, _ = strings.remove_all(token_text, " ")
@@ -292,7 +293,6 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
     append(&lexer.tokens, token)
   }
 }
-
 
 parse :: proc(lex: ^Lexer) -> (ok: bool) {
   for ch, i in lex.data {
@@ -343,6 +343,8 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
       lexer_update_token(lex, .SectionOpen)
     case ch == SECTION_INVERTED && lexer_peek_brace(lex) == TAG_START:
       lexer_update_token(lex, .SectionOpenInverted)
+    case ch == PARTIAL && lexer_peek_brace(lex) == TAG_START:
+      lexer_update_token(lex, .Partial)
     case ch == SECTION_END && lexer_peek_brace(lex) == TAG_START:
       lexer_update_token(lex, .SectionClose)
     case ch == LITERAL && lexer_peek_brace(lex) == TAG_START:
@@ -647,7 +649,7 @@ should_skip_newline :: proc(tokens: []Token) -> (bool) {
 // If we are rendering a .Text tag, we should NOT render it if it is:
 //  - On a line with one .Section tag
 //  - Comprised of only whitespace, along with all the other .Text tokens
-on_standalone_section_line :: proc(tokens: []Token) -> (bool) {
+should_skip_text :: proc(tokens: []Token) -> (bool) {
   standalone_tag_count := 0
   for t in tokens {
     #partial switch t.type {
@@ -655,7 +657,30 @@ on_standalone_section_line :: proc(tokens: []Token) -> (bool) {
       if !is_text_blank(t.value) {
         return false
       }
+    case .Tag, .TagLiteral, .TagLiteralTriple, .Partial:
+      return false
     case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment:
+      standalone_tag_count += 1
+    }
+  }
+
+  // If we have gotten to the end, that means all the .Text
+  // tags on this line are blank. If we also only have a single
+  // section or comment tag, that means that tag is standalone.
+  return standalone_tag_count == 1
+}
+
+is_standalone_partial :: proc(tokens: []Token) -> (bool) {
+  standalone_tag_count := 0
+  for t in tokens {
+    #partial switch t.type {
+    case .Text:
+      if !is_text_blank(t.value) {
+        return false
+      }
+    case .Tag, .TagLiteral, .TagLiteralTriple:
+      return false
+    case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment, .Partial:
       standalone_tag_count += 1
     }
   }
@@ -674,18 +699,27 @@ token_text_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
     return str
   }
 
+  // NOTE: Carriage returns causing some wonkiness with .concatenate.
+  if token.value != "\r" {
+    return token.value
+  }
+
+  return str
+}
+
+delete_if_on_standalone :: proc(tmpl: ^Template, token: Token) -> (bool) {
   on_line := tokens_on_line(tmpl.lexer, token.pos.line)[:]
   defer delete(on_line)
 
-  if token.type == .Newline && should_skip_newline(on_line) {
-    return
+  delete_p: bool
+  #partial switch token.type {
+  case .Newline:
+    delete_p = should_skip_newline(on_line) 
+  case .Text:
+    delete_p = should_skip_text(on_line)
   }
 
-  if token.type == .Text && on_standalone_section_line(on_line) {
-    return
-  }
-
-  return token.value
+  return delete_p
 }
 
 /*
@@ -706,6 +740,67 @@ token_tag_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
   return str
 }
 
+/*
+  When a .Partial token is encountered, we need to inject the contents
+  of the partial into the current list of tokens.
+*/
+template_insert_partial :: proc(tmpl: ^Template, token: Token, index: int) {
+  partial_name := token.value
+  partial_names := [1]string{partial_name}
+  partial_content := data_dig(tmpl.partials, partial_names[:])
+
+  data, ok := partial_content.(string)
+  if !ok {
+    fmt.println("Could not find partial content.")
+    return
+  }
+
+  lexer := Lexer{data=data, line=token.pos.line}
+  if !parse(&lexer) {
+    fmt.println("Could not parse partial content.")
+    return
+  }
+
+  on_line := tokens_on_line(tmpl.lexer, token.pos.line)[:]
+  is_standalone := is_standalone_partial(on_line)
+
+  indent: Token
+  if index > 0 && is_standalone {
+    previous_token := tmpl.lexer.tokens[index-1]
+    // TODO: Also check if standalone!
+    if previous_token.type == .Text && is_text_blank(previous_token.value) {
+      fmt.println("indentation!", previous_token)
+      indent = previous_token
+
+      line := lexer.tokens[len(lexer.tokens)-1].pos.line
+      fmt.println("ILNE", line)
+      #reverse for t, i in lexer.tokens {
+        // When moving back up a line, insert the indentation.
+        fmt.println(i, t)
+        if line != t.pos.line && line > 0 {
+          fmt.println("INSERTING indentation at", i)
+          inject_at(&lexer.tokens, i+1, previous_token)
+        }
+        line = t.pos.line
+      }
+    }
+  }
+
+  fmt.println("LEXER TOK:")
+  lexer_print_tokens(lexer)
+
+  tokens := tmpl.lexer.tokens
+
+  // Removes the .Partial token
+  // ordered_remove(&tmpl.lexer.tokens, index)
+
+  // Inject tokens from the partial into the primary template.
+  #reverse for t in lexer.tokens {
+    fmt.println("injecting partial at:", index+1)
+    inject_at(&tmpl.lexer.tokens, index+1, t)
+  }
+}
+
 template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   str: [dynamic]string
   defer delete(str)
@@ -713,6 +808,34 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
   inject_at(&tmpl.context_stack, 0, root)
 
+  // First pass to find all the whitespace/newline elements
+  // that should be removed. This is performed up-front due
+  // to the partial templates -- we cannot check for the
+  // whitespace logic *after* the partials have been included.
+  to_delete: [dynamic]int
+  for token, i in tmpl.lexer.tokens {
+    #partial switch token.type {
+    case .Newline, .Text:
+      if delete_if_on_standalone(tmpl, token) {
+        append(&to_delete, i) 
+      }
+    }
+  }
+
+  fmt.println("TOKENS")
+  lexer_print_tokens(tmpl.lexer)
+  fmt.println("to_delete:", to_delete)
+
+  // Remove in reverse order to avoid messing up our index
+  // as we iterate.
+  #reverse for i in to_delete {
+    ordered_remove(&tmpl.lexer.tokens, i)
+  }
+
+  fmt.println("TOKENS AFTER DELETE")
+  lexer_print_tokens(tmpl.lexer)
+
+  // Now render all the content in a single pass.
   for token, i in tmpl.lexer.tokens {
     switch token.type {
     case .Newline, .Text:
@@ -723,17 +846,25 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
       template_add_to_context_stack(tmpl, token, i)
     case .SectionClose:
       template_pop_from_context_stack(tmpl)
+    case .Partial:
+      template_insert_partial(tmpl, token, i)
     // Do nothing for these tags.
     case .Comment, .EOF:
     }
+
+    fmt.println("STR:", str)
   }
 
+  fmt.println("TOKENS AFTER PARSE")
+  lexer_print_tokens(tmpl.lexer)
+
   output = strings.concatenate(str[:])
+  fmt.println("output", str)
   return output, true
 }
 
-render :: proc(input: string, data: Data) -> (string, bool) {
-  lexer := Lexer{data=input, cur_token_type=.Text}
+render :: proc(input: string, data: Data, partials := Map{}) -> (string, bool) {
+  lexer := Lexer{data=input}
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
 
@@ -741,7 +872,7 @@ render :: proc(input: string, data: Data) -> (string, bool) {
     return "", false
   }
 
-  template := Template{lexer=lexer, data=data}
+  template := Template{lexer=lexer, data=data, partials=partials}
   defer delete(template.context_stack)
 
   text, ok := template_process(&template)
@@ -751,13 +882,16 @@ render :: proc(input: string, data: Data) -> (string, bool) {
 _main :: proc() -> (err: Error) {
   defer free_all(context.temp_allocator)
 
-  input := "12345{{!\n  This is a\n  multi-line comment...\n}}67890\n"
+  input := "|\r\n{{>partial}}\r\n|"
   data := Map {}
+  partials := Map {
+    "partial" = ">"
+  }
 
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
   fmt.printf("Data : '%v'\n", data)
-  output, ok := render(input, data)
+  output, ok := render(input, data, partials)
   if !ok {
     return .Something
   }
