@@ -113,9 +113,26 @@ escape_html_string :: proc(s: string, allocator := context.allocator) -> (string
   return escaped
 }
 
-/*
-  Digs data from a Data map, given a list of keys.
-*/
+data_get_string :: proc(data: string, key: string) -> (Data) {
+  nil_data: Data
+
+  if key == "." {
+    return data
+  } else {
+    return nil_data
+  }
+}
+
+data_get_map :: proc(data: Map, key: string) -> (Data) {
+  return data[key]
+}
+
+data_get_list :: proc(data: List, key: string) -> (Data) {
+  return data
+}
+
+data_get :: proc{data_get_string, data_get_map, data_get_list}
+
 data_dig :: proc(data: Data, keys: []string) -> (Data) {
   data := data
 
@@ -123,21 +140,14 @@ data_dig :: proc(data: Data, keys: []string) -> (Data) {
     return data
   }
 
-  for k in keys {
+  for key in keys {
     switch _data in data {
-      // Return nil when a string is hit. These can only be accessed
-      // with the implicit "." operator.
-      case string:
-        if keys[0] == "." {
-          return _data
-        } else {
-          dug: Data
-          return dug
-        }
-      case List:
-        return _data
-      case Map:
-        data = _data[k]
+    case string:
+      data = data_get(_data, key)
+    case Map:
+      data = data_get(_data, key)
+    case List:
+      data = data_get(_data, key)
     }
   }
 
@@ -295,6 +305,9 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
 
     switch {
     case ch == '\n' && lex.cur_token_type != .Comment:
+      // When we hit a newline (and we are not inside a .Comment, as multi-line
+      // comments are permitted), add the current chunk as a new Token, insert
+      // a special .Newline token, and then begin as a new .Text Token.
       append_token(lex, lex.cur_token_type)
       lex.cur_token_type = .Newline
       append_token(lex, .Newline)
@@ -342,7 +355,7 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
     fmt.println("Unbalanced braces detected.")
     return false
   } else {
-    // Add the last tag.
+    // Add the last tag and mark that we hit the end of the file.
     lex.cursor += 1
     append_token(lex, lex.cur_token_type)
     lex.cur_token_type = .EOF
@@ -379,16 +392,15 @@ parse :: proc(lex: ^Lexer) -> (ok: bool) {
     "boolean" = "false"
   }
 
-  A Map is a valid top context, as well as any string NOT in the
-  _falsey_context mapping.
-
-  .SectionClose and .Comment tokens have no impact on our output, so they
-  always are true.
+  Valid contexts are:
+    - Map with at least one key
+    - List with at least one element
+    - string NOT in the _falsey_context mapping
 */
 token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool) {
-  // The root stack is always valid.
   stack_entry := tmpl.context_stack[0]
 
+  // The root stack is always valid.
   if stack_entry.label == "ROOT" {
     return true
   }
@@ -409,7 +421,7 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   TODO: Update return value to (string, bool) and add an appropriate
         error and message during the string confirmation phase.
 */
-template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool) -> (string) {
+template_stack_extract :: proc(tmpl: ^Template, token: Token) -> (string) {
   str: string
   resolved: Data
   ok: bool
@@ -443,10 +455,6 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token, escape_html: bool)
   if !ok {
     fmt.println("COULD NOT RESOLVE", resolved, "TO A STRING")
     return ""
-  }
-
-  if escape_html {
-    str = escape_html_string(str)
   }
 
   return str
@@ -503,10 +511,9 @@ template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, index: int)
     to_add = "false"
   }
 
+  // Inverting the content of a .SectionOpen tag if we are inverting it.
   if token.type == .SectionOpenInverted {
     to_add = invert_data(to_add)
-    template_print_stack(tmpl)
-    fmt.println("AD TO STACK", to_add)
   }
 
   switch _data in to_add {
@@ -558,7 +565,6 @@ invert_data :: proc(data: Data) -> (Data) {
 
   switch _data in data {
   case Map:
-    fmt.println("INVERTING", _data)
     if len(_data) > 0 {
       inverted = "false"
     } else {
@@ -619,7 +625,7 @@ tokens_on_line :: proc(lexer: Lexer, line: int) -> (tokens: [dynamic]Token) {
 
 // Skip a newline if we are on a line that has either a
 // non-blank .Text token OR any valid tags.
-skip_newline :: proc(tokens: []Token) -> (bool) {
+should_skip_newline :: proc(tokens: []Token) -> (bool) {
   for t in tokens {
     #partial switch t.type {
     case .Text:
@@ -634,9 +640,10 @@ skip_newline :: proc(tokens: []Token) -> (bool) {
   return true
 }
 
-// If we are rendering a .Text tag, we should NOT render it if it is
-// just made up of whitespace on a Section line.
-is_standalone_tag_line :: proc(tokens: []Token) -> (bool) {
+// If we are rendering a .Text tag, we should NOT render it if it is:
+//  - On a line with one .Section tag
+//  - Comprised of only whitespace, along with all the other .Text tokens
+on_standalone_section_line :: proc(tokens: []Token) -> (bool) {
   standalone_tag_count := 0
   for t in tokens {
     #partial switch t.type {
@@ -658,28 +665,39 @@ is_standalone_tag_line :: proc(tokens: []Token) -> (bool) {
 /*
   Retrieves the content for a given token.
 */
-token_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
+token_text_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
   if !token_valid_in_template_context(tmpl, token) {
     return str
   }
 
   on_line := tokens_on_line(tmpl.lexer, token.pos.line)[:]
 
-  #partial switch token.type {
-  case .Newline:
-    if !skip_newline(on_line) {
-      str = token.value
-    }
-  case .Text:
-    if !is_standalone_tag_line(on_line) {
-      str = token.value
-    }
-  case .Tag:
-    str = template_stack_extract(tmpl, token, true)
-  case .TagLiteral, .TagLiteralTriple:
-    str = template_stack_extract(tmpl, token, false)
+  if token.type == .Newline && should_skip_newline(on_line) {
+    return
   }
 
+  if token.type == .Text && on_standalone_section_line(on_line) {
+    return
+  }
+
+  return token.value
+}
+
+/*
+  Retrieves the content for a given token when it is one of:
+    - .Tag [NOTE: Will have HTML codes escaped]
+    - .TagLiteral
+    - .TagLiteralTriple
+*/
+token_tag_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
+  if !token_valid_in_template_context(tmpl, token) {
+    return str
+  }
+
+  str = template_stack_extract(tmpl, token)
+  if token.type == .Tag {
+    str = escape_html_string(str)
+  }
   return str
 }
 
@@ -690,8 +708,10 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
 
   for token, i in tmpl.lexer.tokens {
     switch token.type {
-    case .Newline, .Text, .Tag, .TagLiteral, .TagLiteralTriple:
-      append(&str, token_content(tmpl, token))
+    case .Newline, .Text:
+      append(&str, token_text_content(tmpl, token))
+    case .Tag, .TagLiteral, .TagLiteralTriple:
+      append(&str, token_tag_content(tmpl, token))
     case .SectionOpen, .SectionOpenInverted:
       template_add_to_context_stack(tmpl, token, i)
     case .SectionClose:
@@ -700,8 +720,6 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     case .Comment, .EOF:
     }
   }
-
-  lexer_print_tokens(tmpl.lexer)
 
   output = strings.concatenate(str[:])
   return output, true
@@ -717,7 +735,6 @@ render :: proc(input: string, data: Data) -> (string, bool) {
   }
 
   template := Template{lexer=lexer, data=data}
-  // return template_process(&template)
   return template_process(&template)
 }
 
