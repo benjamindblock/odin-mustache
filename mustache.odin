@@ -27,6 +27,8 @@ COMMENT_OPEN :: "{{!"
 SECTION_OPEN :: "{{#"
 INVERTED_OPEN :: "{{^"
 SECTION_CLOSE :: "{{/"
+DELIM_OPEN :: "{{="
+DELIM_CLOSE :: "=}}"
 
 /*
   Special characters that will receive HTML-escaping
@@ -449,8 +451,10 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token) -> (string) {
     }
   }
 
-  // Make sure that the final value is a string. If not, raise
-  // error.
+  // TODO: When adding types, make sure that the value is NOT
+  // a Map or a List, instead. We want a single value here.
+  // Make sure that the final value is a single value. If not,
+  // raise error.
   str, ok = resolved.(string)
   if !ok {
     fmt.println("COULD NOT RESOLVE", resolved, "TO A STRING")
@@ -500,8 +504,8 @@ template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, index: int)
   // of the stack entry.
   to_add := data_dig(tmpl.context_stack[0].data, ids)
 
-  // If we couldn't resolve against the top of the stack, add from the
-  // root section.
+  // If we couldn't resolve against the top of the stack,
+  // add from the root.
   if to_add == nil {
     to_add = data_dig(tmpl.context_stack[len(tmpl.context_stack)-1].data, ids)
   }
@@ -671,6 +675,7 @@ token_text_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
   }
 
   on_line := tokens_on_line(tmpl.lexer, token.pos.line)[:]
+  defer delete(on_line)
 
   if token.type == .Newline && should_skip_newline(on_line) {
     return
@@ -703,6 +708,8 @@ token_tag_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
 
 template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   str: [dynamic]string
+  defer delete(str)
+
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
   inject_at(&tmpl.context_stack, 0, root)
 
@@ -735,7 +742,10 @@ render :: proc(input: string, data: Data) -> (string, bool) {
   }
 
   template := Template{lexer=lexer, data=data}
-  return template_process(&template)
+  defer delete(template.context_stack)
+
+  text, ok := template_process(&template)
+  return text, true
 }
 
 _main :: proc() -> (err: Error) {
