@@ -220,16 +220,8 @@ test_partials_spec :: proc(t: ^testing.T) {
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
     input := convert(data)
-
     partials := test_obj["partials"]
     partials_input := convert(partials).(Map)
-
-    // TODO: Only print the name & desc if the test FAILS.
-    fmt.println("*************************")
-    fmt.println(test_name, "-", test_desc)
-    fmt.println(data)
-    fmt.println("Input:", template)
-    fmt.println("Expected:", exp_output)
     assert_mustache(t, template, input, exp_output, partials_input)
   }
 }

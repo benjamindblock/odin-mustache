@@ -459,7 +459,7 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token) -> (string) {
   // raise error.
   str, ok = resolved.(string)
   if !ok {
-    fmt.println("COULD NOT RESOLVE", resolved, "TO A STRING")
+    fmt.println("Could not resolve", resolved, "to a value.")
     return ""
   }
 
@@ -631,8 +631,11 @@ tokens_on_line :: proc(lexer: Lexer, line: int) -> (tokens: [dynamic]Token) {
 
 // Skip a newline if we are on a line that has either a
 // non-blank .Text token OR any valid tags.
-should_skip_newline :: proc(tokens: []Token) -> (bool) {
-  for t in tokens {
+should_skip_newline :: proc(lexer: Lexer, token: Token) -> (bool) {
+  on_line := tokens_on_line(lexer, token.pos.line)[:]
+  defer delete(on_line)
+
+  for t in on_line {
     #partial switch t.type {
     case .Text:
       if !is_text_blank(t.value) {
@@ -649,9 +652,12 @@ should_skip_newline :: proc(tokens: []Token) -> (bool) {
 // If we are rendering a .Text tag, we should NOT render it if it is:
 //  - On a line with one .Section tag
 //  - Comprised of only whitespace, along with all the other .Text tokens
-should_skip_text :: proc(tokens: []Token) -> (bool) {
+should_skip_text :: proc(lexer: Lexer, token: Token) -> (bool) {
+  on_line := tokens_on_line(lexer, token.pos.line)[:]
+  defer delete(on_line)
+
   standalone_tag_count := 0
-  for t in tokens {
+  for t in on_line {
     #partial switch t.type {
     case .Text:
       if !is_text_blank(t.value) {
@@ -670,9 +676,15 @@ should_skip_text :: proc(tokens: []Token) -> (bool) {
   return standalone_tag_count == 1
 }
 
-is_standalone_partial :: proc(tokens: []Token) -> (bool) {
+/*
+  Checks if a given .Partial Token is "standalone."
+*/
+is_standalone_partial :: proc(lexer: Lexer, token: Token) -> (bool) {
+  on_line := tokens_on_line(lexer, token.pos.line)[:]
+  defer delete(on_line)
+
   standalone_tag_count := 0
-  for t in tokens {
+  for t in on_line {
     #partial switch t.type {
     case .Text:
       if !is_text_blank(t.value) {
@@ -707,21 +719,6 @@ token_text_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
   return str
 }
 
-delete_if_on_standalone :: proc(tmpl: ^Template, token: Token) -> (bool) {
-  on_line := tokens_on_line(tmpl.lexer, token.pos.line)[:]
-  defer delete(on_line)
-
-  delete_p: bool
-  #partial switch token.type {
-  case .Newline:
-    delete_p = should_skip_newline(on_line) 
-  case .Text:
-    delete_p = should_skip_text(on_line)
-  }
-
-  return delete_p
-}
-
 /*
   Retrieves the content for a given token when it is one of:
     - .Tag [NOTE: Will have HTML codes escaped]
@@ -748,6 +745,7 @@ template_insert_partial :: proc(tmpl: ^Template, token: Token, index: int) {
   partial_name := token.value
   partial_names := [1]string{partial_name}
   partial_content := data_dig(tmpl.partials, partial_names[:])
+  is_standalone_partial := is_standalone_partial(tmpl.lexer, token)
 
   data, ok := partial_content.(string)
   if !ok {
@@ -761,42 +759,33 @@ template_insert_partial :: proc(tmpl: ^Template, token: Token, index: int) {
     return
   }
 
-  on_line := tokens_on_line(tmpl.lexer, token.pos.line)[:]
-  is_standalone := is_standalone_partial(on_line)
-
-  indent: Token
-  if index > 0 && is_standalone {
-    previous_token := tmpl.lexer.tokens[index-1]
-    // TODO: Also check if standalone!
-    if previous_token.type == .Text && is_text_blank(previous_token.value) {
-      fmt.println("indentation!", previous_token)
-      indent = previous_token
-
-      line := lexer.tokens[len(lexer.tokens)-1].pos.line
-      fmt.println("ILNE", line)
+  // Performs any indentation on the .Partial that we are inserting.
+  //
+  // Example: use the first Token as the indentation for the .Partial Token.
+  // [Token{type=.Text, value="  "}, Token{type=.Partial, value="to_add"}]
+  //
+  if index > 0 && is_standalone_partial {
+    prev_token := tmpl.lexer.tokens[index-1]
+    if prev_token.type == .Text && is_text_blank(prev_token.value) {
+      cur_line := lexer.tokens[len(lexer.tokens)-1].pos.line
       #reverse for t, i in lexer.tokens {
-        // When moving back up a line, insert the indentation.
-        fmt.println(i, t)
-        if line != t.pos.line && line > 0 {
-          fmt.println("INSERTING indentation at", i)
-          inject_at(&lexer.tokens, i+1, previous_token)
+        // Do not indent the top line.
+        if cur_line == 0 {
+          break
         }
-        line = t.pos.line
+
+        // When moving back up a line, insert the indentation.
+        if cur_line != t.pos.line {
+          inject_at(&lexer.tokens, i+1, prev_token)
+        }
+
+        cur_line = t.pos.line
       }
     }
   }
 
-  fmt.println("LEXER TOK:")
-  lexer_print_tokens(lexer)
-
-  tokens := tmpl.lexer.tokens
-
-  // Removes the .Partial token
-  // ordered_remove(&tmpl.lexer.tokens, index)
-
   // Inject tokens from the partial into the primary template.
   #reverse for t in lexer.tokens {
-    fmt.println("injecting partial at:", index+1)
     inject_at(&tmpl.lexer.tokens, index+1, t)
   }
 }
@@ -815,25 +804,22 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   to_delete: [dynamic]int
   for token, i in tmpl.lexer.tokens {
     #partial switch token.type {
-    case .Newline, .Text:
-      if delete_if_on_standalone(tmpl, token) {
+    case .Newline:
+      if should_skip_newline(tmpl.lexer, token) {
+        append(&to_delete, i) 
+      }
+    case .Text:
+      if should_skip_text(tmpl.lexer, token) {
         append(&to_delete, i) 
       }
     }
   }
-
-  fmt.println("TOKENS")
-  lexer_print_tokens(tmpl.lexer)
-  fmt.println("to_delete:", to_delete)
 
   // Remove in reverse order to avoid messing up our index
   // as we iterate.
   #reverse for i in to_delete {
     ordered_remove(&tmpl.lexer.tokens, i)
   }
-
-  fmt.println("TOKENS AFTER DELETE")
-  lexer_print_tokens(tmpl.lexer)
 
   // Now render all the content in a single pass.
   for token, i in tmpl.lexer.tokens {
@@ -851,15 +837,9 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
     // Do nothing for these tags.
     case .Comment, .EOF:
     }
-
-    fmt.println("STR:", str)
   }
 
-  fmt.println("TOKENS AFTER PARSE")
-  lexer_print_tokens(tmpl.lexer)
-
   output = strings.concatenate(str[:])
-  fmt.println("output", str)
   return output, true
 }
 
