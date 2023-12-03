@@ -83,7 +83,7 @@ Pos :: struct {
 }
 
 Lexer :: struct {
-  data: string,
+  src: string,
   cursor: int,
   line: int,
   tokens: [dynamic]Token,
@@ -220,42 +220,42 @@ is_text_blank :: proc(s: string) -> (res: bool) {
   the current type tracked by lexer, and increase the content
   start position by one to account for the additional token.
 */
-lexer_update_token :: proc(lexer: ^Lexer, new_type: TokenType) {
-  lexer.cur_token_start_pos += 1
-  lexer.cur_token_type = new_type
+lexer_update_token :: proc(l: ^Lexer, new_type: TokenType) {
+  l.cur_token_start_pos += 1
+  l.cur_token_type = new_type
 }
 
-lexer_push_brace :: proc(lexer: ^Lexer, brace: rune) {
-  inject_at(&lexer.tag_stack, 0, brace)
+lexer_push_brace :: proc(l: ^Lexer, brace: rune) {
+  inject_at(&l.tag_stack, 0, brace)
 }
 
-lexer_peek_brace :: proc(lexer: ^Lexer) -> (rune) {
-  if len(lexer.tag_stack) == 0 {
+lexer_peek_brace :: proc(l: ^Lexer) -> (rune) {
+  if len(l.tag_stack) == 0 {
     return 0
   } else {
-    return lexer.tag_stack[0]
+    return l.tag_stack[0]
   }
 }
 
-lexer_pop_brace :: proc(lexer: ^Lexer) {
-  ordered_remove(&lexer.tag_stack, 0)
+lexer_pop_brace :: proc(l: ^Lexer) {
+  ordered_remove(&l.tag_stack, 0)
 }
 
-lexer_tag_stack_len :: proc(lexer: ^Lexer) -> (int) {
-  return len(lexer.tag_stack)
+lexer_tag_stack_len :: proc(l: ^Lexer) -> (int) {
+  return len(l.tag_stack)
 }
 
-peek :: proc(lexer: ^Lexer, s: string, offset := 0) -> (bool) {
+peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
   peek_i: int
   peeked: rune
 
-  if lexer.cursor + offset + len(s) >= len(lexer.data) {
+  if l.cursor + offset + len(s) >= len(l.src) {
     return false
   }
 
   for i := 0; i < len(s); i += 1 {
-    peek_i = lexer.cursor + offset + i
-    peeked = rune(lexer.data[peek_i])
+    peek_i = l.cursor + offset + i
+    peeked = rune(l.src[peek_i])
     if peeked != rune(s[i]) {
       return false
     }
@@ -270,7 +270,7 @@ peek :: proc(lexer: ^Lexer, s: string, offset := 0) -> (bool) {
   to advance the next start position by three instead of two,
   to account for the additional brace.
 */
-lexer_start_new_token :: proc(l: ^Lexer, new_type: TokenType) {
+lexer_start :: proc(l: ^Lexer, new_type: TokenType) {
   cur_type := l.cur_token_type
 
   switch {
@@ -315,14 +315,14 @@ lexer_start_new_token :: proc(l: ^Lexer, new_type: TokenType) {
 /*
   Adds a new token to our list.
 */
-lexer_append :: proc(l: ^Lexer, token_type: TokenType) {
-  #partial switch token_type {
+lexer_append :: proc(l: ^Lexer) {
+  #partial switch l.cur_token_type {
   case .Text:
     append_text(l)
   case .Newline:
     append_newline(l)
   case:
-    append_tag(l, token_type)
+    append_tag(l, l.cur_token_type)
   }
 }
 
@@ -336,7 +336,7 @@ append_tag :: proc(l: ^Lexer, token_type: TokenType) {
   if pos.end > pos.start {
     // Remove all empty whitespace inside a valid tag so that we don't
     // mess up our access of the data.
-    token_text := l.data[pos.start:pos.end]
+    token_text := l.src[pos.start:pos.end]
     token_text, _ = strings.remove_all(token_text, " ")
     token := Token{type=token_type, value=token_text, pos=pos}
     append(&l.tokens, token)
@@ -351,7 +351,7 @@ append_text :: proc(l: ^Lexer) {
   }
 
   if pos.end > pos.start {
-    text := l.data[pos.start:pos.end]
+    text := l.src[pos.start:pos.end]
     token := Token{type=.Text, value=text, pos=pos}
     append(&l.tokens, token)
   }
@@ -369,7 +369,7 @@ append_newline :: proc(l: ^Lexer) {
 }
 
 parse :: proc(l: ^Lexer) -> (ok: bool) {
-  for ch, i in l.data {
+  for ch, i in l.src {
     l.cursor = i
 
     switch {
@@ -380,42 +380,43 @@ parse :: proc(l: ^Lexer) -> (ok: bool) {
     }
 
     switch {
+    // When we hit a newline (and we are not inside a .Comment, as multi-line
+    // comments are permitted), add the current chunk as a new Token, insert
+    // a special .Newline token, and then begin as a new .Text Token.
     case ch == '\n' && l.cur_token_type != .Comment:
-      // When we hit a newline (and we are not inside a .Comment, as multi-line
-      // comments are permitted), add the current chunk as a new Token, insert
-      // a special .Newline token, and then begin as a new .Text Token.
-      lexer_append(l, l.cur_token_type)
-      lexer_start_new_token(l, .Newline)
-      append_newline(l)
-      lexer_start_new_token(l, .Text)
+      lexer_append(l)
+      lexer_start(l, .Newline)
+      lexer_append(l)
+      lexer_start(l, .Text)
       l.line += 1
-    case peek(l, l.delim.otag_lit) && l.cur_token_type == .Text:
-      lexer_append(l, TokenType.Text)
-      lexer_start_new_token(l, .TagLiteralTriple)
-    case peek(l, l.delim.otag_section_open) && l.cur_token_type == .Text:
-      lexer_append(l, TokenType.Text)
-      lexer_start_new_token(l, .SectionOpen)
-    case peek(l, l.delim.otag_section_close) && l.cur_token_type == .Text:
-      lexer_append(l, TokenType.Text)
-      lexer_start_new_token(l, .SectionClose)
-    case peek(l, l.delim.otag_inverted) && l.cur_token_type == .Text:
-      lexer_append(l, TokenType.Text)
-      lexer_start_new_token(l, .SectionOpenInverted)
-    case peek(l, l.delim.otag_partial) && l.cur_token_type == .Text:
-      lexer_append(l, TokenType.Text)
-      lexer_start_new_token(l, .Partial)
-    case peek(l, l.delim.otag_literal) && l.cur_token_type == .Text:
-      lexer_append(l, TokenType.Text)
-      lexer_start_new_token(l, .TagLiteral)
-    case peek(l, l.delim.otag_comment) && l.cur_token_type == .Text:
-      lexer_append(l, TokenType.Text)
-      lexer_start_new_token(l, .Comment)
-    case peek(l, l.delim.otag) && l.cur_token_type == .Text:
-      lexer_append(l, TokenType.Text)
-      lexer_start_new_token(l, .Tag)
+    case peek(l, l.delim.otag_lit):
+      lexer_append(l)
+      lexer_start(l, .TagLiteralTriple)
+    case peek(l, l.delim.otag_section_open):
+      lexer_append(l)
+      lexer_start(l, .SectionOpen)
+    case peek(l, l.delim.otag_section_close):
+      lexer_append(l)
+      lexer_start(l, .SectionClose)
+    case peek(l, l.delim.otag_inverted):
+      lexer_append(l)
+      lexer_start(l, .SectionOpenInverted)
+    case peek(l, l.delim.otag_partial):
+      lexer_append(l)
+      lexer_start(l, .Partial)
+    case peek(l, l.delim.otag_literal):
+      lexer_append(l)
+      lexer_start(l, .TagLiteral)
+    case peek(l, l.delim.otag_comment):
+      lexer_append(l)
+      lexer_start(l, .Comment)
+    // Be careful with checking for "{{" -- it could be a substring of "{{{"
+    case peek(l, l.delim.otag) && l.cur_token_type != .TagLiteralTriple:
+      lexer_append(l)
+      lexer_start(l, .Tag)
     case ch == TAG_END && l.cur_token_type != .Text:
-      lexer_append(l, l.cur_token_type)
-      lexer_start_new_token(l, .Text)
+      lexer_append(l)
+      lexer_start(l, .Text)
     }
   }
 
@@ -426,7 +427,7 @@ parse :: proc(l: ^Lexer) -> (ok: bool) {
   } else {
     // Add the last tag and mark that we hit the end of the file.
     l.cursor += 1
-    lexer_append(l, l.cur_token_type)
+    lexer_append(l)
     l.cur_token_type = .EOF
     return true
   }
@@ -539,14 +540,10 @@ template_print_stack :: proc(tmpl: ^Template) {
 }
 
 /*
-  ... when a list is encountered ...
-
   .SectionOpen #repo ["resque", "sidekiq", "countries"]
     .Text
     .Tag
   .SectionClose /repo
-
-  ... becomes ...
 
   .SectionOpen #repo ["resque", "sidekiq", "countries"]
     .SectionOpen "resque"
@@ -818,7 +815,7 @@ template_insert_partial :: proc(tmpl: ^Template, token: Token, index: int) {
     return
   }
 
-  lexer := Lexer{data=data, line=token.pos.line, delim=CORE_DEF}
+  lexer := Lexer{src=data, line=token.pos.line, delim=CORE_DEF}
   if !parse(&lexer) {
     fmt.println("Could not parse partial content.")
     return
@@ -909,7 +906,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
 }
 
 render :: proc(input: string, data: Data, partials := Map{}) -> (string, bool) {
-  lexer := Lexer{data=input, delim=CORE_DEF}
+  lexer := Lexer{src=input, delim=CORE_DEF}
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
 
