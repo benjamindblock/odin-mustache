@@ -12,30 +12,19 @@ import "core:strings"
 TAG_START :: '{'
 TAG_END :: '}'
 
-/*
-  Mustache tag descriptions needed for lexing.
-*/
-STANDARD_OPEN :: "{{"
-STANDARD_CLOSE :: "}}"
-LITERAL_CLOSE :: "}}}"
-SECTION_OPEN :: "{{#"
-INVERTED_OPEN :: "{{^"
-SECTION_CLOSE :: "{{/"
-DELIM_OPEN :: "{{="
-DELIM_CLOSE :: "=}}"
-
 TokenDelimiter :: struct {
   otag: string,
   ctag: string,
   otag_lit: string,
   ctag_lit: string,
-  section_open_c: rune,
-  section_close_c: rune,
-  literal_c: rune,
-  comment_c: rune,
-  inverted_c: rune,
-  partial_c: rune,
-  change_delim_c: rune
+  otag_section_open: string,
+  otag_section_close: string,
+  otag_literal: string,
+  otag_comment: string,
+  otag_inverted: string,
+  otag_partial: string,
+  otag_delim: string,
+  ctag_delim: string
 }
 
 CORE_DEF :: TokenDelimiter {
@@ -43,13 +32,14 @@ CORE_DEF :: TokenDelimiter {
   ctag = "}}",
   otag_lit = "{{{",
   ctag_lit = "}}}",
-  section_open_c = '#',
-  section_close_c = '/',
-  literal_c = '&',
-  comment_c = '!',
-  inverted_c = '^',
-  partial_c = '>',
-  change_delim_c = '='
+  otag_section_open = "{{#",
+  otag_section_close = "{{/",
+  otag_literal = "{{&",
+  otag_comment = "{{!",
+  otag_inverted = "{{^",
+  otag_partial = "{{>",
+  otag_delim = "{{=",
+  ctag_delim = "=}}"
 }
 
 /*
@@ -280,74 +270,102 @@ peek :: proc(lexer: ^Lexer, s: string, offset := 0) -> (bool) {
   to advance the next start position by three instead of two,
   to account for the additional brace.
 */
-lexer_start_new_token :: proc(lexer: ^Lexer, new_type: TokenType) {
-  cur_type := lexer.cur_token_type
+lexer_start_new_token :: proc(l: ^Lexer, new_type: TokenType) {
+  cur_type := l.cur_token_type
 
   switch {
   // Moving from some type of tag back to regular text.
   case cur_type == .Text:
     switch new_type {
     case .SectionOpen:
-      lexer.cur_token_start_pos = lexer.cursor + len("{{#")
+      l.cur_token_start_pos = l.cursor + len(l.delim.otag_section_open)
     case .SectionClose:
-      lexer.cur_token_start_pos = lexer.cursor + len("{{/")
+      l.cur_token_start_pos = l.cursor + len(l.delim.otag_section_close)
     case .SectionOpenInverted:
-      lexer.cur_token_start_pos = lexer.cursor + len("{{^")
+      l.cur_token_start_pos = l.cursor + len(l.delim.otag_inverted)
     case .Partial:
-      lexer.cur_token_start_pos = lexer.cursor + len("{{>")
+      l.cur_token_start_pos = l.cursor + len(l.delim.otag_partial)
     case .Comment:
-      lexer.cur_token_start_pos = lexer.cursor + len("{{!")
+      l.cur_token_start_pos = l.cursor + len(l.delim.otag_comment)
     case .TagLiteral:
-      lexer.cur_token_start_pos = lexer.cursor + len("{{&")
+      l.cur_token_start_pos = l.cursor + len(l.delim.otag_literal)
     case .TagLiteralTriple:
-      lexer.cur_token_start_pos = lexer.cursor + len("{{{")
+      l.cur_token_start_pos = l.cursor + len(l.delim.otag_lit)
     case .Tag:
-      lexer.cur_token_start_pos = lexer.cursor + len("{{")
+      l.cur_token_start_pos = l.cursor + len(l.delim.otag)
     case .Text, .Newline, .EOF:
     }
   // Moving from some type of tag into text.
   case new_type == .Text:
     switch cur_type {
     case .Newline:
-      lexer.cur_token_start_pos = lexer.cursor + len("\n")
+      l.cur_token_start_pos = l.cursor + len("\n")
     case .Tag, .SectionOpenInverted, .TagLiteral, .SectionClose, .SectionOpen, .Comment, .Partial:
-      lexer.cur_token_start_pos = lexer.cursor + len("}}")
+      l.cur_token_start_pos = l.cursor + len(l.delim.ctag)
     case .TagLiteralTriple:
-      lexer.cur_token_start_pos = lexer.cursor + len("}}}")
+      l.cur_token_start_pos = l.cursor + len(l.delim.ctag_lit)
     case .Text, .EOF:
     }
   }
 
   // Update the current type to the new type.
-  lexer.cur_token_type = new_type
+  l.cur_token_type = new_type
 }
 
 /*
   Adds a new token to our list.
 */
-append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
-  start_pos := lexer.cur_token_start_pos
-  end_pos := lexer.cursor
-  token_text := lexer.data[start_pos:end_pos]
-
+lexer_append :: proc(l: ^Lexer, token_type: TokenType) {
   #partial switch token_type {
+  case .Text:
+    append_text(l)
   case .Newline:
-    end_pos += 1
-    token_text = "\n"
-  case .Tag, .TagLiteral, .TagLiteralTriple, .SectionOpen, .SectionClose, .Partial:
+    append_newline(l)
+  case:
+    append_tag(l, token_type)
+  }
+}
+
+append_tag :: proc(l: ^Lexer, token_type: TokenType) {
+  pos := Pos{
+    start=l.cur_token_start_pos,
+    end=l.cursor,
+    line=l.line
+  }
+
+  if pos.end > pos.start {
     // Remove all empty whitespace inside a valid tag so that we don't
     // mess up our access of the data.
+    token_text := l.data[pos.start:pos.end]
     token_text, _ = strings.remove_all(token_text, " ")
+    token := Token{type=token_type, value=token_text, pos=pos}
+    append(&l.tokens, token)
+  }
+}
+
+append_text :: proc(l: ^Lexer) {
+  pos := Pos{
+    start=l.cur_token_start_pos,
+    end=l.cursor,
+    line=l.line
   }
 
-  if start_pos != end_pos && len(token_text) > 0 {
-    token := Token{
-      type=token_type,
-      value=token_text,
-      pos=Pos{start_pos, end_pos, lexer.line}
-    }
-    append(&lexer.tokens, token)
+  if pos.end > pos.start {
+    text := l.data[pos.start:pos.end]
+    token := Token{type=.Text, value=text, pos=pos}
+    append(&l.tokens, token)
   }
+}
+
+append_newline :: proc(l: ^Lexer) {
+  pos := Pos{
+    start=l.cur_token_start_pos,
+    end=l.cursor + 1,
+    line=l.line
+  }
+
+  newline := Token{type=.Newline, value="\n", pos=pos}
+  append(&l.tokens, newline)
 }
 
 parse :: proc(l: ^Lexer) -> (ok: bool) {
@@ -366,37 +384,37 @@ parse :: proc(l: ^Lexer) -> (ok: bool) {
       // When we hit a newline (and we are not inside a .Comment, as multi-line
       // comments are permitted), add the current chunk as a new Token, insert
       // a special .Newline token, and then begin as a new .Text Token.
-      append_token(l, l.cur_token_type)
+      lexer_append(l, l.cur_token_type)
       lexer_start_new_token(l, .Newline)
-      append_token(l, .Newline)
+      append_newline(l)
       lexer_start_new_token(l, .Text)
       l.line += 1
     case peek(l, l.delim.otag_lit) && l.cur_token_type == .Text:
-      append_token(l, TokenType.Text)
+      lexer_append(l, TokenType.Text)
       lexer_start_new_token(l, .TagLiteralTriple)
-    case peek(l, "{{#") && l.cur_token_type == .Text:
-      append_token(l, TokenType.Text)
+    case peek(l, l.delim.otag_section_open) && l.cur_token_type == .Text:
+      lexer_append(l, TokenType.Text)
       lexer_start_new_token(l, .SectionOpen)
-    case peek(l, "{{/") && l.cur_token_type == .Text:
-      append_token(l, TokenType.Text)
+    case peek(l, l.delim.otag_section_close) && l.cur_token_type == .Text:
+      lexer_append(l, TokenType.Text)
       lexer_start_new_token(l, .SectionClose)
-    case peek(l, "{{^") && l.cur_token_type == .Text:
-      append_token(l, TokenType.Text)
+    case peek(l, l.delim.otag_inverted) && l.cur_token_type == .Text:
+      lexer_append(l, TokenType.Text)
       lexer_start_new_token(l, .SectionOpenInverted)
-    case peek(l, "{{>") && l.cur_token_type == .Text:
-      append_token(l, TokenType.Text)
+    case peek(l, l.delim.otag_partial) && l.cur_token_type == .Text:
+      lexer_append(l, TokenType.Text)
       lexer_start_new_token(l, .Partial)
-    case peek(l, "{{&") && l.cur_token_type == .Text:
-      append_token(l, TokenType.Text)
+    case peek(l, l.delim.otag_literal) && l.cur_token_type == .Text:
+      lexer_append(l, TokenType.Text)
       lexer_start_new_token(l, .TagLiteral)
-    case peek(l, "{{!") && l.cur_token_type == .Text:
-      append_token(l, TokenType.Text)
+    case peek(l, l.delim.otag_comment) && l.cur_token_type == .Text:
+      lexer_append(l, TokenType.Text)
       lexer_start_new_token(l, .Comment)
     case peek(l, l.delim.otag) && l.cur_token_type == .Text:
-      append_token(l, TokenType.Text)
+      lexer_append(l, TokenType.Text)
       lexer_start_new_token(l, .Tag)
     case ch == TAG_END && l.cur_token_type != .Text:
-      append_token(l, l.cur_token_type)
+      lexer_append(l, l.cur_token_type)
       lexer_start_new_token(l, .Text)
     }
   }
@@ -408,7 +426,7 @@ parse :: proc(l: ^Lexer) -> (ok: bool) {
   } else {
     // Add the last tag and mark that we hit the end of the file.
     l.cursor += 1
-    append_token(l, l.cur_token_type)
+    lexer_append(l, l.cur_token_type)
     l.cur_token_type = .EOF
     return true
   }
