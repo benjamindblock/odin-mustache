@@ -274,7 +274,7 @@ lexer_start :: proc(l: ^Lexer, new_type: TokenType) {
   cur_type := l.cur_token_type
 
   switch {
-  // Moving from some type of tag back to regular text.
+  // Moving from text into a tag.
   case cur_type == .Text:
     switch new_type {
     case .SectionOpen:
@@ -295,7 +295,7 @@ lexer_start :: proc(l: ^Lexer, new_type: TokenType) {
       l.cur_token_start_pos = l.cursor + len(l.delim.otag)
     case .Text, .Newline, .EOF:
     }
-  // Moving from some type of tag into text.
+  // Moving from a tag back into text.
   case new_type == .Text:
     switch cur_type {
     case .Newline:
@@ -414,7 +414,7 @@ parse :: proc(l: ^Lexer) -> (ok: bool) {
     case peek(l, l.delim.otag) && l.cur_token_type != .TagLiteralTriple:
       lexer_append(l)
       lexer_start(l, .Tag)
-    case ch == TAG_END && l.cur_token_type != .Text:
+    case peek(l, "}") && l.cur_token_type != .Text:
       lexer_append(l)
       lexer_start(l, .Text)
     }
@@ -924,11 +924,9 @@ render :: proc(input: string, data: Data, partials := Map{}) -> (string, bool) {
 _main :: proc() -> (err: Error) {
   defer free_all(context.temp_allocator)
 
-  input := "|\r\n{{>partial}}\r\n|"
-  data := Map {}
-  partials := Map {
-    "partial" = ">"
-  }
+  input := "Hello, {{name}}!"
+  data := Map{"name" = "Ben"}
+  partials := Map{}
 
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
