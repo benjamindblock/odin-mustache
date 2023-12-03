@@ -11,12 +11,6 @@ import "core:strings"
 */
 TAG_START :: '{'
 TAG_END :: '}'
-SECTION_START :: '#'
-SECTION_END :: '/'
-LITERAL :: '&'
-COMMENT :: '!'
-SECTION_INVERTED:: '^'
-PARTIAL:: '>'
 
 /*
   Mustache tag descriptions needed for lexing.
@@ -24,13 +18,39 @@ PARTIAL:: '>'
 STANDARD_OPEN :: "{{"
 STANDARD_CLOSE :: "}}"
 LITERAL_CLOSE :: "}}}"
-COMMENT_OPEN :: "{{!"
 SECTION_OPEN :: "{{#"
 INVERTED_OPEN :: "{{^"
 SECTION_CLOSE :: "{{/"
 DELIM_OPEN :: "{{="
 DELIM_CLOSE :: "=}}"
-PARTIAL_OPEN :: "{{>"
+
+TokenDelimiter :: struct {
+  otag: string,
+  ctag: string,
+  otag_lit: string,
+  ctag_lit: string,
+  section_open_c: rune,
+  section_close_c: rune,
+  literal_c: rune,
+  comment_c: rune,
+  inverted_c: rune,
+  partial_c: rune,
+  change_delim_c: rune
+}
+
+CORE_DEF :: TokenDelimiter {
+  otag = "{{",
+  ctag = "}}",
+  otag_lit = "{{{",
+  ctag_lit = "}}}",
+  section_open_c = '#',
+  section_close_c = '/',
+  literal_c = '&',
+  comment_c = '!',
+  inverted_c = '^',
+  partial_c = '>',
+  change_delim_c = '='
+}
 
 /*
   Special characters that will receive HTML-escaping
@@ -78,8 +98,9 @@ Lexer :: struct {
   line: int,
   tokens: [dynamic]Token,
   cur_token_type: TokenType,
-  last_token_start_pos: int,
-  tag_stack: [dynamic]rune
+  cur_token_start_pos: int,
+  tag_stack: [dynamic]rune,
+  delim: TokenDelimiter
 }
 
 // All data provided will either be:
@@ -210,7 +231,7 @@ is_text_blank :: proc(s: string) -> (res: bool) {
   start position by one to account for the additional token.
 */
 lexer_update_token :: proc(lexer: ^Lexer, new_type: TokenType) {
-  lexer.last_token_start_pos += 1
+  lexer.cur_token_start_pos += 1
   lexer.cur_token_type = new_type
 }
 
@@ -234,10 +255,23 @@ lexer_tag_stack_len :: proc(lexer: ^Lexer) -> (int) {
   return len(lexer.tag_stack)
 }
 
-lexer_peek :: proc(lexer: ^Lexer, forward := 1) -> (rune) {
-  peek_i := lexer.cursor + forward
-  peeked := rune(lexer.data[peek_i])
-  return peeked
+peek :: proc(lexer: ^Lexer, s: string, offset := 0) -> (bool) {
+  peek_i: int
+  peeked: rune
+
+  if lexer.cursor + offset + len(s) >= len(lexer.data) {
+    return false
+  }
+
+  for i := 0; i < len(s); i += 1 {
+    peek_i = lexer.cursor + offset + i
+    peeked = rune(lexer.data[peek_i])
+    if peeked != rune(s[i]) {
+      return false
+    }
+  }
+
+  return true
 }
 
 /*
@@ -246,23 +280,45 @@ lexer_peek :: proc(lexer: ^Lexer, forward := 1) -> (rune) {
   to advance the next start position by three instead of two,
   to account for the additional brace.
 */
-lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
+lexer_start_new_token :: proc(lexer: ^Lexer, new_type: TokenType) {
   cur_type := lexer.cur_token_type
 
-  if new_type == .TagLiteralTriple || cur_type == .TagLiteralTriple {
-    lexer.last_token_start_pos = lexer.cursor + len(LITERAL_CLOSE)
-  } else {
+  switch {
+  // Moving from some type of tag back to regular text.
+  case cur_type == .Text:
+    switch new_type {
+    case .SectionOpen:
+      lexer.cur_token_start_pos = lexer.cursor + len("{{#")
+    case .SectionClose:
+      lexer.cur_token_start_pos = lexer.cursor + len("{{/")
+    case .SectionOpenInverted:
+      lexer.cur_token_start_pos = lexer.cursor + len("{{^")
+    case .Partial:
+      lexer.cur_token_start_pos = lexer.cursor + len("{{>")
+    case .Comment:
+      lexer.cur_token_start_pos = lexer.cursor + len("{{!")
+    case .TagLiteral:
+      lexer.cur_token_start_pos = lexer.cursor + len("{{&")
+    case .TagLiteralTriple:
+      lexer.cur_token_start_pos = lexer.cursor + len("{{{")
+    case .Tag:
+      lexer.cur_token_start_pos = lexer.cursor + len("{{")
+    case .Text, .Newline, .EOF:
+    }
+  // Moving from some type of tag into text.
+  case new_type == .Text:
     switch cur_type {
-    case .Text:
-      lexer.last_token_start_pos = lexer.cursor + len(STANDARD_OPEN)
     case .Newline:
-      lexer.last_token_start_pos = lexer.cursor + 1
+      lexer.cur_token_start_pos = lexer.cursor + len("\n")
     case .Tag, .SectionOpenInverted, .TagLiteral, .SectionClose, .SectionOpen, .Comment, .Partial:
-      lexer.last_token_start_pos = lexer.cursor + len(STANDARD_CLOSE)
-    case .TagLiteralTriple, .EOF:
+      lexer.cur_token_start_pos = lexer.cursor + len("}}")
+    case .TagLiteralTriple:
+      lexer.cur_token_start_pos = lexer.cursor + len("}}}")
+    case .Text, .EOF:
     }
   }
 
+  // Update the current type to the new type.
   lexer.cur_token_type = new_type
 }
 
@@ -270,7 +326,7 @@ lexer_reset_token :: proc(lexer: ^Lexer, new_type: TokenType) {
   Adds a new token to our list.
 */
 append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
-  start_pos := lexer.last_token_start_pos
+  start_pos := lexer.cur_token_start_pos
   end_pos := lexer.cursor
   token_text := lexer.data[start_pos:end_pos]
 
@@ -294,75 +350,66 @@ append_token :: proc(lexer: ^Lexer, token_type: TokenType) {
   }
 }
 
-parse :: proc(lex: ^Lexer) -> (ok: bool) {
-  for ch, i in lex.data {
-    lex.cursor = i
+parse :: proc(l: ^Lexer) -> (ok: bool) {
+  for ch, i in l.data {
+    l.cursor = i
 
     switch {
       case ch == TAG_START:
-        lexer_push_brace(lex, ch)
+        lexer_push_brace(l, ch)
       case ch == TAG_END:
-        lexer_pop_brace(lex)
+        lexer_pop_brace(l)
     }
 
     switch {
-    case ch == '\n' && lex.cur_token_type != .Comment:
+    case ch == '\n' && l.cur_token_type != .Comment:
       // When we hit a newline (and we are not inside a .Comment, as multi-line
       // comments are permitted), add the current chunk as a new Token, insert
       // a special .Newline token, and then begin as a new .Text Token.
-      append_token(lex, lex.cur_token_type)
-      lex.cur_token_type = .Newline
-      append_token(lex, .Newline)
-      lexer_reset_token(lex, .Text)
-      lex.line += 1
-    case ch == TAG_START && lexer_peek(lex) == TAG_START && lexer_peek(lex, 2) == TAG_START:
-      // If we were processing text and hit an opening brace '{',
-      // then create that text token and flag that we are heading
-      // inside a brace now.
-      if lex.cur_token_type == .Text {
-        append_token(lex, TokenType.Text)
-        lexer_reset_token(lex, .TagLiteralTriple)
-      }
-    case ch == TAG_START && lexer_peek(lex) == TAG_START:
-      // If we were processing text and hit an opening brace '{',
-      // then create that text token and flag that we are heading
-      // inside a brace now.
-      if lex.cur_token_type == .Text {
-        append_token(lex, TokenType.Text)
-        lexer_reset_token(lex, .Tag)
-      }
-    case ch == TAG_END:
-      // If we hit the end of a tag and are not in a text tag,
-      // create a new tag. If in text and we came across a random
-      // '}' rune, don't do anything.
-      if lexer_tag_stack_len(lex) > 0 && lex.cur_token_type != .Text {
-        append_token(lex, lex.cur_token_type)
-        lexer_reset_token(lex, .Text)
-      }
-    case ch == SECTION_START && lexer_peek_brace(lex) == TAG_START:
-      lexer_update_token(lex, .SectionOpen)
-    case ch == SECTION_INVERTED && lexer_peek_brace(lex) == TAG_START:
-      lexer_update_token(lex, .SectionOpenInverted)
-    case ch == PARTIAL && lexer_peek_brace(lex) == TAG_START:
-      lexer_update_token(lex, .Partial)
-    case ch == SECTION_END && lexer_peek_brace(lex) == TAG_START:
-      lexer_update_token(lex, .SectionClose)
-    case ch == LITERAL && lexer_peek_brace(lex) == TAG_START:
-      lexer_update_token(lex, .TagLiteral)
-    case ch == COMMENT && lexer_peek_brace(lex) == TAG_START:
-      lexer_update_token(lex, .Comment)
+      append_token(l, l.cur_token_type)
+      lexer_start_new_token(l, .Newline)
+      append_token(l, .Newline)
+      lexer_start_new_token(l, .Text)
+      l.line += 1
+    case peek(l, l.delim.otag_lit) && l.cur_token_type == .Text:
+      append_token(l, TokenType.Text)
+      lexer_start_new_token(l, .TagLiteralTriple)
+    case peek(l, "{{#") && l.cur_token_type == .Text:
+      append_token(l, TokenType.Text)
+      lexer_start_new_token(l, .SectionOpen)
+    case peek(l, "{{/") && l.cur_token_type == .Text:
+      append_token(l, TokenType.Text)
+      lexer_start_new_token(l, .SectionClose)
+    case peek(l, "{{^") && l.cur_token_type == .Text:
+      append_token(l, TokenType.Text)
+      lexer_start_new_token(l, .SectionOpenInverted)
+    case peek(l, "{{>") && l.cur_token_type == .Text:
+      append_token(l, TokenType.Text)
+      lexer_start_new_token(l, .Partial)
+    case peek(l, "{{&") && l.cur_token_type == .Text:
+      append_token(l, TokenType.Text)
+      lexer_start_new_token(l, .TagLiteral)
+    case peek(l, "{{!") && l.cur_token_type == .Text:
+      append_token(l, TokenType.Text)
+      lexer_start_new_token(l, .Comment)
+    case peek(l, l.delim.otag) && l.cur_token_type == .Text:
+      append_token(l, TokenType.Text)
+      lexer_start_new_token(l, .Tag)
+    case ch == TAG_END && l.cur_token_type != .Text:
+      append_token(l, l.cur_token_type)
+      lexer_start_new_token(l, .Text)
     }
   }
 
-  if lexer_tag_stack_len(lex) > 0 {
+  if lexer_tag_stack_len(l) > 0 {
     // Fail out if we have unbalanced braces for tags.
     fmt.println("Unbalanced braces detected.")
     return false
   } else {
     // Add the last tag and mark that we hit the end of the file.
-    lex.cursor += 1
-    append_token(lex, lex.cur_token_type)
-    lex.cur_token_type = .EOF
+    l.cursor += 1
+    append_token(l, l.cur_token_type)
+    l.cur_token_type = .EOF
     return true
   }
 }
@@ -753,7 +800,7 @@ template_insert_partial :: proc(tmpl: ^Template, token: Token, index: int) {
     return
   }
 
-  lexer := Lexer{data=data, line=token.pos.line}
+  lexer := Lexer{data=data, line=token.pos.line, delim=CORE_DEF}
   if !parse(&lexer) {
     fmt.println("Could not parse partial content.")
     return
@@ -844,7 +891,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
 }
 
 render :: proc(input: string, data: Data, partials := Map{}) -> (string, bool) {
-  lexer := Lexer{data=input}
+  lexer := Lexer{data=input, delim=CORE_DEF}
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
 
