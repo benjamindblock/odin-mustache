@@ -478,9 +478,8 @@ template_insert_partial :: proc(
   return nil
 }
 
-template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
-  str: [dynamic]string
-  defer delete(str)
+template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) {
+  b: strings.Builder
 
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
   inject_at(&tmpl.context_stack, 0, root)
@@ -495,25 +494,24 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   }
 
   // Second pass to render the template.
-  for token, i in tmpl.lexer.tokens {
-    switch token.type {
+  for t, i in tmpl.lexer.tokens {
+    switch t.type {
     case .Newline, .Text:
-      append(&str, token_text_content(tmpl, token))
+      strings.write_string(&b, token_text_content(tmpl, t))
     case .Tag, .TagLiteral, .TagLiteralTriple:
-      append(&str, token_tag_content(tmpl, token))
+      strings.write_string(&b, token_tag_content(tmpl, t))
     case .SectionOpen, .SectionOpenInverted:
-      template_add_to_context_stack(tmpl, token, i)
+      template_add_to_context_stack(tmpl, t, i)
     case .SectionClose:
       template_pop_from_context_stack(tmpl)
     case .Partial:
-      template_insert_partial(tmpl, token, i)
+      template_insert_partial(tmpl, t, i)
     // Do nothing for these tags.
     case .Comment, .Skip, .EOF:
     }
   }
 
-  output = strings.concatenate(str[:])
-  return output, true
+  return strings.to_string(b), nil
 }
 
 render :: proc(input: string, data: Data, partials := Map{}) -> (s: string, err: RenderError) {
