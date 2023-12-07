@@ -252,91 +252,115 @@ template_print_stack :: proc(tmpl: ^Template) {
   }
 }
 
-/*
-  .SectionOpen #repo ["resque", "sidekiq", "countries"]
-    .Text
-    .Tag
-  .SectionClose /repo
-
-  .SectionOpen #repo ["resque", "sidekiq", "countries"]
-    .SectionOpen "resque"
-      .Text
-      .Tag
-    .SectionClose "resque"
-    .SectionOpen "sidekiq"
-      .Text
-      .Tag
-    .SectionClose "sidekiq"
-    .SectionOpen "countries"
-      .Text
-      .Tag
-    .SectionClose "countries"
-  .SectionClose /repo
-*/
-template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, offset: int) {
-  data_id := token.value
-  ids := strings.split(data_id, ".", allocator=context.temp_allocator)
+get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: Data) {
+  ids := strings.split(data_id, ".")
+  defer delete(ids)
 
   // New stack entries always need to resolve against the current top
   // of the stack entry.
-  to_add := data_dig(tmpl.context_stack[0].data, ids)
+  data = data_dig(tmpl.context_stack[0].data, ids)
 
-  // If we couldn't resolve against the top of the stack,
-  // add from the root.
-  if to_add == nil {
-    to_add = data_dig(tmpl.context_stack[len(tmpl.context_stack)-1].data, ids)
+  // If we couldn't resolve against the top of the stack, add from the root.
+  if data == nil {
+    root_stack_entry := tmpl.context_stack[len(tmpl.context_stack)-1]
+    data = data_dig(root_stack_entry.data, ids)
   }
 
-  // If we STILL can't find anything, mark this section as false-y.
-  if to_add == nil {
-    to_add = "false"
+  // If we still can't find anything, mark this section as false-y.
+  if data == nil {
+    data = "false"
   }
 
-  // Inverting the content of a .SectionOpen tag if we are inverting it.
+  return data
+}
+
+template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, offset: int) {
+  data_id := token.value
+  data := get_data_for_stack(tmpl, data_id)
+
   if token.type == .SectionOpenInverted {
-    to_add = invert_data(to_add)
+    data = invert_data(data)
   }
 
-  switch _data in to_add {
+  switch _data in data {
   case Map:
-    stack_entry := ContextStackEntry{data=to_add, label=data_id}
+    stack_entry := ContextStackEntry{data=data, label=data_id}
     inject_at(&tmpl.context_stack, 0, stack_entry)
   case List:
-    start_chunk := offset + 1
-    end_chunk := template_find_section_close_tag_index(tmpl, data_id, offset)
-    chunk := slice.clone_to_dynamic(tmpl.lexer.tokens[start_chunk:end_chunk])
-
-    // Remove the original chunk from the token list.
-    for _ in start_chunk..<end_chunk {
-      ordered_remove(&tmpl.lexer.tokens, start_chunk)
-    }
-
-    // Add the "loop" chunk N-times to the token list.
-    // ordered_remove(&tmpl.context_stack, 0)
-    for i in 0..<len(_data) {
-      // When performing list-substitution, add a .SectionClose to pop off
-      // the top item IF it is NOT a list items. List items will need to
-      // undergo substitution and should not be discarded.
-      #partial switch _d in _data[i] {
-        case Map, string:
-          inject_at(
-            &tmpl.lexer.tokens,
-            start_chunk,
-            Token{.SectionClose, "TEMP LIST", Pos{-1, -1, token.pos.line}}
-          )
-      }
-
-      #reverse for t in chunk {
-        inject_at(&tmpl.lexer.tokens, start_chunk, t)
-      }
-
-      // Add the loop data to the context_stack in reverse order of the list,
-      // so that the first entry is at the top.
-      stack_entry := ContextStackEntry{data=_data[len(_data)-1-i], label="TEMP LIST"}
-      inject_at(&tmpl.context_stack, 0, stack_entry)
-    }
+    inject_list_into_tokens(tmpl, _data, offset)
   case string:
-    stack_entry := ContextStackEntry{data=to_add, label=data_id}
+    stack_entry := ContextStackEntry{data=data, label=data_id}
+    inject_at(&tmpl.context_stack, 0, stack_entry)
+  }
+}
+
+/*
+  When a List is encountered as part of a .SectionOpen tag, we need to
+  insert the section chunk for each iteration of the list.
+
+  NOTE: This is probably not a good way to do this, if a list contains
+  thousands or millions of entries -- we then have to make the list of
+  Token structs the exact length of the expanded list.
+*/
+
+// For example:
+//   .SectionOpen #repo ["resque", "sidekiq", "countries"]
+//     .Text
+//     .Tag
+//   .SectionClose /repo
+//
+// Becomes:
+//   .SectionOpen #repo ["resque", "sidekiq", "countries"]
+//     .SectionOpen "resque"
+//       .Text
+//       .Tag
+//     .SectionClose "resque"
+//     .SectionOpen "sidekiq"
+//       .Text
+//       .Tag
+//     .SectionClose "sidekiq"
+//     .SectionOpen "countries"
+//       .Text
+//       .Tag
+//     .SectionClose "countries"
+//   .SectionClose /repo
+inject_list_into_tokens :: proc(tmpl: ^Template, list: List, offset: int) {
+  t := tmpl.lexer.tokens[offset]
+  section_name := t.value
+
+  start_chunk := offset + 1
+  end_chunk := template_find_section_close_tag_index(tmpl, section_name, offset)
+  chunk := slice.clone_to_dynamic(tmpl.lexer.tokens[start_chunk:end_chunk])
+  defer delete(chunk)
+
+  // Remove the original chunk from the token list.
+  for _ in start_chunk..<end_chunk {
+    ordered_remove(&tmpl.lexer.tokens, start_chunk)
+  }
+
+  // Add the chunk N-times to the token list.
+  for i in 0..<len(list) {
+    // When performing list-substitution, add a .SectionClose to pop off
+    // the top item IF it is NOT a list items. List items will need to
+    // undergo substitution and should not be discarded.
+    switch _ in list[i] {
+    case Map, string:
+      inject_at(
+        &tmpl.lexer.tokens,
+        start_chunk,
+        Token{.SectionClose, "TEMP LIST", Pos{-1, -1, t.pos.line}}
+      )
+    case List:
+    }
+
+    // Append each token in the list chunk that needs to be injected.
+    #reverse for token in chunk {
+      inject_at(&tmpl.lexer.tokens, start_chunk, token)
+    }
+
+    // Add the loop data to the context_stack in reverse order of the list,
+    // so that the first entry is at the top.
+    stack_entry := ContextStackEntry{data=list[len(list)-1-i], label="TEMP LIST"}
     inject_at(&tmpl.context_stack, 0, stack_entry)
   }
 }
@@ -390,38 +414,24 @@ template_pop_from_context_stack :: proc(tmpl: ^Template) {
   }
 }
 
-/*
-  Retrieves the content for a given token.
-*/
-token_text_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
-  if !token_valid_in_template_context(tmpl, token) {
-    return str
+token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
+  switch t.type {
+  case .Text:
+    // NOTE: Carriage returns causing some wonkiness with .concatenate.
+    if t.value != "\r" {
+      s = t.value
+    }
+  case .Tag:
+    s = template_stack_extract(tmpl, t)
+    s = escape_html_string(s)
+  case .TagLiteral, .TagLiteralTriple:
+    s = template_stack_extract(tmpl, t)
+  case .Newline:
+    s = "\n"
+  case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment, .Skip, .EOF, .Partial:
   }
 
-  // NOTE: Carriage returns causing some wonkiness with .concatenate.
-  if token.value != "\r" {
-    return token.value
-  }
-
-  return str
-}
-
-/*
-  Retrieves the content for a given token when it is one of:
-    - .Tag [NOTE: Will have HTML codes escaped]
-    - .TagLiteral
-    - .TagLiteralTriple
-*/
-token_tag_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
-  if !token_valid_in_template_context(tmpl, token) {
-    return str
-  }
-
-  str = template_stack_extract(tmpl, token)
-  if token.type == .Tag {
-    str = escape_html_string(str)
-  }
-  return str
+  return s
 }
 
 /*
@@ -432,9 +442,7 @@ template_insert_partial :: proc(
   tmpl: ^Template, token: Token, offset: int
 ) -> (err: LexerError) {
   partial_name := token.value
-  partial_names := [1]string{partial_name}
-  partial_content := data_dig(tmpl.partials, partial_names[:])
-  is_standalone_partial := is_standalone_partial(tmpl.lexer, token)
+  partial_content := data_dig(tmpl.partials, []string{partial_name})
 
   data, ok := partial_content.(string)
   if !ok {
@@ -450,7 +458,8 @@ template_insert_partial :: proc(
   // Example: use the first Token as the indentation for the .Partial Token.
   // [Token{type=.Text, value="  "}, Token{type=.Partial, value="to_add"}]
   //
-  if offset > 0 && is_standalone_partial {
+  standalone := is_standalone_partial(tmpl.lexer, token)
+  if offset > 0 && standalone {
     prev_token := tmpl.lexer.tokens[offset-1]
     if prev_token.type == .Text && is_text_blank(prev_token.value) {
       cur_line := lexer.tokens[len(lexer.tokens)-1].pos.line
@@ -496,10 +505,10 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
   // Second pass to render the template.
   for t, i in tmpl.lexer.tokens {
     switch t.type {
-    case .Newline, .Text:
-      strings.write_string(&b, token_text_content(tmpl, t))
-    case .Tag, .TagLiteral, .TagLiteralTriple:
-      strings.write_string(&b, token_tag_content(tmpl, t))
+    case .Newline, .Text, .Tag, .TagLiteral, .TagLiteralTriple:
+      if token_valid_in_template_context(tmpl, t) {
+        strings.write_string(&b, token_content(tmpl, t))
+      }
     case .SectionOpen, .SectionOpenInverted:
       template_add_to_context_stack(tmpl, t, i)
     case .SectionClose:
