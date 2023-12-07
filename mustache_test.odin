@@ -12,6 +12,7 @@ COMMENTS_SPEC :: "spec/comments.json"
 SECTIONS_SPEC :: "spec/sections.json"
 INVERTED_SPEC :: "spec/inverted.json"
 PARTIALS_SPEC :: "spec/partials.json"
+DELIMITERS_SPEC :: "spec/delimiters.json"
 
 load_spec :: proc(filename: string) -> (json.Value) {
   data, ok := os.read_entire_file_from_filename(filename)
@@ -225,3 +226,33 @@ test_partials_spec :: proc(t: ^testing.T) {
     assert_mustache(t, template, input, exp_output, partials_input)
   }
 }
+
+// @(test)
+// test_delimiters_spec :: proc(t: ^testing.T) {
+//   spec := load_spec(DELIMITERS_SPEC)
+//   defer json.destroy_value(spec)
+
+//   root := spec.(json.Object)
+//   tests := root["tests"].(json.Array)
+
+//   for test, i in tests {
+//     if i > 0 do break
+
+//     test_obj := test.(json.Object)
+//     test_name := test_obj["name"].(string)
+//     test_desc := test_obj["desc"].(string)
+//     template := test_obj["template"].(string)
+//     exp_output := test_obj["expected"].(string)
+//     data := test_obj["data"]
+//     input := convert(data)
+
+//     // Not all the test cases have partials.
+//     partials := test_obj["partials"]
+//     partials_input, ok := convert(partials).(Map)
+//     if !ok {
+//       partials_input = Map{}
+//     }
+
+//     assert_mustache(t, template, input, exp_output, partials_input)
+//   }
+// }

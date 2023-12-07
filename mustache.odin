@@ -51,10 +51,15 @@ HTML_GREATER_THAN :: "&gt;"
 HTML_QUOTE :: "&quot;"
 HTML_AMPERSAND :: "&amp;"
 
-Error :: enum {
-  None,
-  Something
+RenderError :: union {
+  LexerError
 }
+
+LexerError :: union {
+  UnbalancedTags
+}
+
+UnbalancedTags :: struct {}
 
 Token :: struct {
   type: TokenType,
@@ -316,13 +321,14 @@ lexer_start :: proc(l: ^Lexer, new_type: TokenType) {
   Adds a new token to our list.
 */
 lexer_append :: proc(l: ^Lexer) {
-  #partial switch l.cur_token_type {
+  switch l.cur_token_type {
   case .Text:
     append_text(l)
   case .Newline:
     append_newline(l)
-  case:
+  case .Tag, .TagLiteral, .TagLiteralTriple, .Comment, .Partial, .SectionOpen, .SectionOpenInverted, .SectionClose:
     append_tag(l, l.cur_token_type)
+  case .EOF:
   }
 }
 
@@ -368,16 +374,10 @@ append_newline :: proc(l: ^Lexer) {
   append(&l.tokens, newline)
 }
 
-parse :: proc(l: ^Lexer) -> (ok: bool) {
-  for ch, i in l.src {
-    l.cursor = i
-
-    switch {
-      case ch == TAG_START:
-        lexer_push_brace(l, ch)
-      case ch == TAG_END:
-        lexer_pop_brace(l)
-    }
+parse :: proc(l: ^Lexer) -> (err: LexerError) {
+  for l.cursor < len(l.src) {
+    ch := rune(l.src[l.cursor])
+    defer { l.cursor += 1 }
 
     switch {
     // When we hit a newline (and we are not inside a .Comment, as multi-line
@@ -420,17 +420,10 @@ parse :: proc(l: ^Lexer) -> (ok: bool) {
     }
   }
 
-  if lexer_tag_stack_len(l) > 0 {
-    // Fail out if we have unbalanced braces for tags.
-    fmt.println("Unbalanced braces detected.")
-    return false
-  } else {
-    // Add the last tag and mark that we hit the end of the file.
-    l.cursor += 1
-    lexer_append(l)
-    l.cur_token_type = .EOF
-    return true
-  }
+  // Add the last tag and mark that we hit the end of the file.
+  lexer_append(l)
+  l.cur_token_type = .EOF
+  return nil
 }
 
 /*
@@ -560,7 +553,7 @@ template_print_stack :: proc(tmpl: ^Template) {
     .SectionClose "countries"
   .SectionClose /repo
 */
-template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, index: int) {
+template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, offset: int) {
   data_id := token.value
   ids := strings.split(data_id, ".", allocator=context.temp_allocator)
 
@@ -589,8 +582,8 @@ template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, index: int)
     stack_entry := ContextStackEntry{data=to_add, label=data_id}
     inject_at(&tmpl.context_stack, 0, stack_entry)
   case List:
-    start_chunk := index + 1
-    end_chunk := template_find_section_close_tag_index(tmpl, data_id, index)
+    start_chunk := offset + 1
+    end_chunk := template_find_section_close_tag_index(tmpl, data_id, offset)
     chunk := slice.clone_to_dynamic(tmpl.lexer.tokens[start_chunk:end_chunk])
 
     // Remove the original chunk from the token list.
@@ -655,12 +648,13 @@ invert_data :: proc(data: Data) -> (Data) {
   return inverted
 }
 
-template_find_section_close_tag_index :: proc(tmpl: ^Template, label: string, index: int) -> (int) {
-  for token, i in tmpl.lexer.tokens[index:] {
+// Finds the closing tag with a given value.
+template_find_section_close_tag_index :: proc(tmpl: ^Template, label: string, offset: int) -> (int) {
+  for token, i in tmpl.lexer.tokens[offset:] {
     #partial switch token.type {
       case .SectionClose:
         if token.value == label {
-          return i + index
+          return i + offset
         }
     }
   }
@@ -803,7 +797,7 @@ token_tag_content :: proc(tmpl: ^Template, token: Token) -> (str: string) {
   When a .Partial token is encountered, we need to inject the contents
   of the partial into the current list of tokens.
 */
-template_insert_partial :: proc(tmpl: ^Template, token: Token, index: int) {
+template_insert_partial :: proc(tmpl: ^Template, token: Token, offset: int) -> (err: LexerError) {
   partial_name := token.value
   partial_names := [1]string{partial_name}
   partial_content := data_dig(tmpl.partials, partial_names[:])
@@ -816,18 +810,15 @@ template_insert_partial :: proc(tmpl: ^Template, token: Token, index: int) {
   }
 
   lexer := Lexer{src=data, line=token.pos.line, delim=CORE_DEF}
-  if !parse(&lexer) {
-    fmt.println("Could not parse partial content.")
-    return
-  }
+  parse(&lexer) or_return
 
   // Performs any indentation on the .Partial that we are inserting.
   //
   // Example: use the first Token as the indentation for the .Partial Token.
   // [Token{type=.Text, value="  "}, Token{type=.Partial, value="to_add"}]
   //
-  if index > 0 && is_standalone_partial {
-    prev_token := tmpl.lexer.tokens[index-1]
+  if offset > 0 && is_standalone_partial {
+    prev_token := tmpl.lexer.tokens[offset-1]
     if prev_token.type == .Text && is_text_blank(prev_token.value) {
       cur_line := lexer.tokens[len(lexer.tokens)-1].pos.line
       #reverse for t, i in lexer.tokens {
@@ -848,8 +839,10 @@ template_insert_partial :: proc(tmpl: ^Template, token: Token, index: int) {
 
   // Inject tokens from the partial into the primary template.
   #reverse for t in lexer.tokens {
-    inject_at(&tmpl.lexer.tokens, index+1, t)
+    inject_at(&tmpl.lexer.tokens, offset+1, t)
   }
+
+  return nil
 }
 
 template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
@@ -905,23 +898,21 @@ template_process :: proc(tmpl: ^Template) -> (output: string, ok: bool) {
   return output, true
 }
 
-render :: proc(input: string, data: Data, partials := Map{}) -> (string, bool) {
+render :: proc(input: string, data: Data, partials := Map{}) -> (s: string, err: RenderError) {
   lexer := Lexer{src=input, delim=CORE_DEF}
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
 
-  if !parse(&lexer) {
-    return "", false
-  }
+  parse(&lexer) or_return
 
   template := Template{lexer=lexer, data=data, partials=partials}
   defer delete(template.context_stack)
 
   text, ok := template_process(&template)
-  return text, true
+  return text, nil
 }
 
-_main :: proc() -> (err: Error) {
+_main :: proc() -> (err: RenderError) {
   defer free_all(context.temp_allocator)
 
   input := "Hello, {{name}}!"
@@ -931,14 +922,11 @@ _main :: proc() -> (err: Error) {
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
   fmt.printf("Data : '%v'\n", data)
-  output, ok := render(input, data, partials)
-  if !ok {
-    return .Something
-  }
+  output := render(input, data, partials) or_return
   fmt.printf("Output: %v\n", output)
   fmt.println("")
 
-  return .None
+  return nil
 }
 
 main :: proc() {
