@@ -303,14 +303,20 @@ tokens_on_same_line :: proc(l: Lexer, line: int) -> (tokens: []Token) {
 should_skip_newline :: proc(l: Lexer, token: Token) -> (bool) {
   on_line := tokens_on_same_line(l, token.pos.line)
 
+  // If the newline is the only token present, do not skip it.
+  if len(on_line) == 1 {
+    return false
+  }
+
   for t in on_line {
-    #partial switch t.type {
+    switch t.type {
     case .Text:
       if !is_text_blank(t.value) {
         return false
       }
     case .Tag, .TagLiteral, .TagLiteralTriple:
       return false
+    case .SectionOpen, .SectionClose, .SectionOpenInverted, .Comment, .Partial, .Newline, .Skip, .EOF:
     }
   }
 
