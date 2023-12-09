@@ -103,38 +103,6 @@ data_dig :: proc(data: Data, keys: []string) -> (Data) {
   return data
 }
 
-trim_decimal_string :: proc(s: string) -> string {
-  if len(s) == 0 || s[len(s)-1] != '0' {
-    return s
-  }
-
-  // We have at least one trailing zero. Search backwards and find the rest.
-  trailing_start_idx := len(s)-1
-  for i := len(s) - 2; i >= 0 ; i -= 1 {
-    switch s[i] {
-      case '0':
-        if trailing_start_idx == i + 1 {
-          trailing_start_idx = i
-        }
-
-      case '.':
-        if trailing_start_idx == i + 1 {
-          // Removes point completely for numbers like 0.000
-          trailing_start_idx = i
-        }
-
-        return s[:trailing_start_idx]
-    }
-  }
-
-  return s
-}
-
-// Checks if a rune is plain whitespace.
-is_whitespace :: proc(r: rune) -> (bool) {
-  return _whitespace[r]
-}
-
 // Checks if a string is plain whitespace.
 is_text_blank :: proc(s: string) -> (res: bool) {
   for r in s {
@@ -400,7 +368,9 @@ token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
   of the partial into the current list of tokens.
 */
 template_insert_partial :: proc(
-  tmpl: ^Template, token: Token, offset: int
+  tmpl: ^Template,
+  token: Token,
+  offset: int
 ) -> (err: LexerError) {
   partial_name := token.value
   partial_content := data_dig(tmpl.partials, []string{partial_name})
@@ -468,6 +438,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
   for i < len(tmpl.lexer.tokens) {
     defer { i += 1 }
     t := tmpl.lexer.tokens[i]
+
     switch t.type {
     case .Newline, .Text, .Tag, .TagLiteral, .TagLiteralTriple:
       if token_valid_in_template_context(tmpl, t) {

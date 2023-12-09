@@ -7,12 +7,12 @@ import "core:os"
 import "core:runtime"
 import "core:testing"
 
-INTERPOLATION_SPEC :: "spec/interpolation.json"
 COMMENTS_SPEC :: "spec/comments.json"
-SECTIONS_SPEC :: "spec/sections.json"
+DELIMITERS_SPEC :: "spec/delimiters.json"
+INTERPOLATION_SPEC :: "spec/interpolation.json"
 INVERTED_SPEC :: "spec/inverted.json"
 PARTIALS_SPEC :: "spec/partials.json"
-DELIMITERS_SPEC :: "spec/delimiters.json"
+SECTIONS_SPEC :: "spec/sections.json"
 
 load_spec :: proc(filename: string) -> (json.Value) {
   data, ok := os.read_entire_file_from_filename(filename)
@@ -30,41 +30,6 @@ load_spec :: proc(filename: string) -> (json.Value) {
   }
 
   return json_data
-}
-
-convert :: proc(val: json.Value) -> (Data) {
-  input: Data
-  #partial switch v in val {
-    case json.Null:
-      input = ""
-    case i64:
-      decimal_str := fmt.aprintf("%v", v)
-      input = trim_decimal_string(decimal_str)
-    case f64:
-      decimal_str := fmt.aprintf("%v", v)
-      input = trim_decimal_string(decimal_str)
-    case bool:
-      input = fmt.aprintf("%v", v)
-    case string:
-      input = v
-    case json.Object:
-      data := make(Map, allocator=context.temp_allocator)
-      for key, val in v {
-        new_k := string(key)
-        new_v := convert(val)
-        data[new_k] = new_v
-      }
-      input = data
-    case json.Array:
-      data := make(List, allocator=context.temp_allocator)
-      for val in v {
-        new_v := convert(val)
-        append(&data, new_v)
-      }
-      input = data
-  }
-
-  return input
 }
 
 // TODO: Better printing and logging if .expect() fails.
@@ -125,7 +90,7 @@ test_interpolation_spec :: proc(t: ^testing.T) {
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
-    input := convert(data)
+    input := load_json(data)
 
     assert_mustache(t, template, input, exp_output)
   }
@@ -146,7 +111,7 @@ test_comments_spec :: proc(t: ^testing.T) {
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
-    input := convert(data)
+    input := load_json(data)
 
     // TODO: Only print the name & desc if the test FAILS.
     // fmt.println("*************************")
@@ -172,7 +137,7 @@ test_sections_spec :: proc(t: ^testing.T) {
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
-    input := convert(data)
+    input := load_json(data)
 
     // TODO: Only print the name & desc if the test FAILS.
     // fmt.println("*************************")
@@ -199,7 +164,7 @@ test_inverted_spec :: proc(t: ^testing.T) {
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
-    input := convert(data)
+    input := load_json(data)
 
     assert_mustache(t, template, input, exp_output)
   }
@@ -215,14 +180,12 @@ test_partials_spec :: proc(t: ^testing.T) {
 
   for test, i in tests {
     test_obj := test.(json.Object)
-    test_name := test_obj["name"].(string)
-    test_desc := test_obj["desc"].(string)
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
-    input := convert(data)
+    input := load_json(data)
     partials := test_obj["partials"]
-    partials_input := convert(partials).(Map)
+    partials_input := load_json(partials).(Map)
     assert_mustache(t, template, input, exp_output, partials_input)
   }
 }
@@ -244,11 +207,11 @@ test_partials_spec :: proc(t: ^testing.T) {
 //     template := test_obj["template"].(string)
 //     exp_output := test_obj["expected"].(string)
 //     data := test_obj["data"]
-//     input := convert(data)
+//     input := load_json(data)
 
 //     // Not all the test cases have partials.
 //     partials := test_obj["partials"]
-//     partials_input, ok := convert(partials).(Map)
+//     partials_input, ok := load_json(partials).(Map)
 //     if !ok {
 //       partials_input = Map{}
 //     }
