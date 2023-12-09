@@ -3,37 +3,30 @@ package mustache
 import "core:encoding/json"
 import "core:fmt"
 
-load_json :: proc(val: json.Value) -> (Data) {
-  input: Data
-
-  switch v in val {
-  case json.Null:
-    input = ""
+load_json :: proc(val: json.Value) -> (loaded: Data) {
+  switch _val in val {
+  case bool, string:
+    loaded = fmt.aprintf("%v", _val)
   case i64, f64:
-    decimal_str := fmt.aprintf("%v", v)
-    input = trim_decimal_string(decimal_str)
-  case bool:
-    input = fmt.aprintf("%v", v)
-  case string:
-    input = v
+    decimal_str := fmt.aprintf("%v", _val)
+    loaded = trim_decimal_string(decimal_str)
   case json.Object:
-    data := make(Map, allocator=context.temp_allocator)
-    for key, val in v {
-      new_k := string(key)
-      new_v := load_json(val)
-      data[new_k] = new_v
+    data := Map{}
+    for key, val in _val {
+      new_k := fmt.aprintf("%v", key)
+      data[new_k] = load_json(val)
     }
-    input = data
+    loaded = data
   case json.Array:
-    data := make(List, allocator=context.temp_allocator)
-    for val in v {
-      new_v := load_json(val)
-      append(&data, new_v)
+    data := List{}
+    for v in _val {
+      append(&data, load_json(v))
     }
-    input = data
+    loaded = data
+  case json.Null:
   }
 
-  return input
+  return loaded
 }
 
 trim_decimal_string :: proc(s: string) -> string {
