@@ -37,7 +37,9 @@ CORE_DEF :: TokenDelimiter {
 Token :: struct {
   type: TokenType,
   value: string,
-  pos: Pos
+  pos: Pos,
+  iters: int,
+  start_i: int
 }
 
 TokenType :: enum {
@@ -316,7 +318,8 @@ should_skip_newline :: proc(l: Lexer, token: Token) -> (bool) {
       }
     case .Tag, .TagLiteral, .TagLiteralTriple:
       return false
-    case .SectionOpen, .SectionClose, .SectionOpenInverted, .Comment, .Partial, .Newline, .Skip, .EOF:
+    case .SectionOpen, .SectionClose, .SectionOpenInverted, .Comment,
+         .Partial, .Newline, .Skip, .EOF:
     }
   }
 
@@ -331,7 +334,7 @@ should_skip_text :: proc(l: Lexer, token: Token) -> (bool) {
 
   standalone_tag_count := 0
   for t in on_line {
-    #partial switch t.type {
+    switch t.type {
     case .Text:
       if !is_text_blank(t.value) {
         return false
@@ -340,6 +343,7 @@ should_skip_text :: proc(l: Lexer, token: Token) -> (bool) {
       return false
     case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment:
       standalone_tag_count += 1
+    case .Newline, .Skip, .EOF:
     }
   }
 
@@ -357,7 +361,7 @@ is_standalone_partial :: proc(l: Lexer, token: Token) -> (bool) {
 
   standalone_tag_count := 0
   for t in on_line {
-    #partial switch t.type {
+    switch t.type {
     case .Text:
       if !is_text_blank(t.value) {
         return false
@@ -366,6 +370,7 @@ is_standalone_partial :: proc(l: Lexer, token: Token) -> (bool) {
       return false
     case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment, .Partial:
       standalone_tag_count += 1
+    case .Newline, .Skip, .EOF:
     }
   }
 

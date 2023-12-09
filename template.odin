@@ -274,11 +274,11 @@ get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: Data) {
   return data
 }
 
-template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, offset: int) {
-  data_id := token.value
+template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
+  data_id := t.value
   data := get_data_for_stack(tmpl, data_id)
 
-  if token.type == .SectionOpenInverted {
+  if t.type == .SectionOpenInverted {
     data = invert_data(data)
   }
 
@@ -287,80 +287,41 @@ template_add_to_context_stack :: proc(tmpl: ^Template, token: Token, offset: int
     stack_entry := ContextStackEntry{data=data, label=data_id}
     inject_at(&tmpl.context_stack, 0, stack_entry)
   case List:
-    inject_list_into_tokens(tmpl, _data, offset)
+    inject_list_data_into_context_stack(tmpl, _data, offset)
   case string:
     stack_entry := ContextStackEntry{data=data, label=data_id}
     inject_at(&tmpl.context_stack, 0, stack_entry)
   }
 }
 
-/*
-  When a List is encountered as part of a .SectionOpen tag, we need to
-  insert the section chunk for each iteration of the list.
-
-  NOTE: This is probably not a good way to do this, if a list contains
-  thousands or millions of entries -- we then have to make the list of
-  Token structs the exact length of the expanded list.
-*/
-
-// For example:
-//   .SectionOpen #repo ["resque", "sidekiq", "countries"]
-//     .Text
-//     .Tag
-//   .SectionClose /repo
-//
-// Becomes:
-//   .SectionOpen #repo ["resque", "sidekiq", "countries"]
-//     .SectionOpen "resque"
-//       .Text
-//       .Tag
-//     .SectionClose "resque"
-//     .SectionOpen "sidekiq"
-//       .Text
-//       .Tag
-//     .SectionClose "sidekiq"
-//     .SectionOpen "countries"
-//       .Text
-//       .Tag
-//     .SectionClose "countries"
-//   .SectionClose /repo
-inject_list_into_tokens :: proc(tmpl: ^Template, list: List, offset: int) {
-  t := tmpl.lexer.tokens[offset]
-  section_name := t.value
-
+inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: List, offset: int) {
+  section_open := tmpl.lexer.tokens[offset]
+  section_name := section_open.value
   start_chunk := offset + 1
   end_chunk := template_find_section_close_tag_index(tmpl, section_name, offset)
-  chunk := slice.clone_to_dynamic(tmpl.lexer.tokens[start_chunk:end_chunk])
-  defer delete(chunk)
 
-  // Remove the original chunk from the token list.
-  for _ in start_chunk..<end_chunk {
-    ordered_remove(&tmpl.lexer.tokens, start_chunk)
+  // Remove the original chunk from the token list if the list is empty.
+  // We treat empty lists as false-y values.
+  if len(list) == 0 {
+    for _ in start_chunk..<end_chunk {
+      ordered_remove(&tmpl.lexer.tokens, start_chunk)
+    }
+    return
   }
 
-  // Add the chunk N-times to the token list.
-  for i in 0..<len(list) {
-    // When performing list-substitution, add a .SectionClose to pop off
-    // the top item IF it is NOT a list items. List items will need to
-    // undergo substitution and should not be discarded.
-    switch _ in list[i] {
-    case Map, string:
-      inject_at(
-        &tmpl.lexer.tokens,
-        start_chunk,
-        Token{.SectionClose, "TEMP LIST", Pos{-1, -1, t.pos.line}}
-      )
-    case List:
-    }
 
-    // Append each token in the list chunk that needs to be injected.
-    #reverse for token in chunk {
-      inject_at(&tmpl.lexer.tokens, start_chunk, token)
-    }
+  // If we have a list with contents, update the closing tag with:
+  // 1. The number of iterations to perform
+  // 2. The position of the start of the loop (eg., .SectionOpen tag)
+  section_close := tmpl.lexer.tokens[end_chunk]
+  section_close.iters = len(list) - 1
+  section_close.start_i = offset
+  tmpl.lexer.tokens[end_chunk] = section_close
 
-    // Add the loop data to the context_stack in reverse order of the list,
-    // so that the first entry is at the top.
-    stack_entry := ContextStackEntry{data=list[len(list)-1-i], label="TEMP LIST"}
+  // Add each element of the list to the context stack. Add the data in
+  // reverse order of the list, so that the first entry is at the top.
+  for i := section_close.iters; i >= 0; i -= 1 {
+    stack_entry := ContextStackEntry{data=list[i], label="TEMP LIST"}
     inject_at(&tmpl.context_stack, 0, stack_entry)
   }
 }
@@ -392,16 +353,16 @@ invert_data :: proc(data: Data) -> (Data) {
   return inverted
 }
 
-// Finds the closing tag with a given value.
+// Finds the closing tag with a given value after
+// the given offset.
 template_find_section_close_tag_index :: proc(
-  tmpl: ^Template, label: string, offset: int
+  tmpl: ^Template,
+  label: string,
+  offset: int
 ) -> (int) {
-  for token, i in tmpl.lexer.tokens[offset:] {
-    #partial switch token.type {
-      case .SectionClose:
-        if token.value == label {
-          return i + offset
-        }
+  for t, i in tmpl.lexer.tokens[offset:] {
+    if t.type == .SectionClose && t.value == label {
+      return i + offset
     }
   }
 
@@ -503,7 +464,10 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
   }
 
   // Second pass to render the template.
-  for t, i in tmpl.lexer.tokens {
+  i := 0
+  for i < len(tmpl.lexer.tokens) {
+    defer { i += 1 }
+    t := tmpl.lexer.tokens[i]
     switch t.type {
     case .Newline, .Text, .Tag, .TagLiteral, .TagLiteralTriple:
       if token_valid_in_template_context(tmpl, t) {
@@ -511,8 +475,14 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
       }
     case .SectionOpen, .SectionOpenInverted:
       template_add_to_context_stack(tmpl, t, i)
+      // lexer_print_tokens(tmpl.lexer)
     case .SectionClose:
       template_pop_from_context_stack(tmpl)
+      if t.iters > 0 {
+        t.iters -= 1
+        tmpl.lexer.tokens[i] = t
+        i = t.start_i
+      }
     case .Partial:
       template_insert_partial(tmpl, t, i)
     // Do nothing for these tags.
@@ -547,8 +517,6 @@ render_from_filename :: proc(
 ) -> (s: string, err: RenderError) {
   src, _ := os.read_entire_file_from_filename(filename)
   str := string(src)
-
-  fmt.println(str)
 
   lexer := Lexer{src=str, delim=CORE_DEF}
   defer delete(lexer.tag_stack)

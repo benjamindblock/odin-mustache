@@ -8,9 +8,8 @@ _main :: proc() -> (err: RenderError) {
   defer free_all(context.temp_allocator)
 
   input := "tmp/test.txt"
-  data := Map{
-    "name" = "Ben",
-    "institution" = "UPS"
+  data := Map {
+    "names" = List{"Ben", "Jono", "Sarah", "Phil"}
   }
 
   fmt.printf("====== RENDERING\n")
