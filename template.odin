@@ -386,11 +386,11 @@ get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: any) {
   }
 
   // If we still can't find anything, mark this section as false-y.
-  if data == nil {
-    data = "false"
+  if reflect.is_nil(data) {
+    return runtime.new_clone("false")^
+  } else {
+    return data
   }
-
-  return data
 }
 
 template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
@@ -398,28 +398,23 @@ template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
   data := get_data_for_stack(tmpl, data_id)
 
   if t.type == .SectionOpenInverted {
-    data = invert_data(data)
-  }
-
-  switch data_type(data) {
-  case .Map, .Struct, .Value:
-    stack_entry := ContextStackEntry{data=data, label=data_id}
+    stack_entry := ContextStackEntry{
+      data=invert_data(data),
+      label=data_id
+    }
     inject_at(&tmpl.context_stack, 0, stack_entry)
-  case .List:
-    inject_list_data_into_context_stack(tmpl, data, offset)
-  case .Nil:
+  } else {
+    switch data_type(data) {
+    case .Map, .Struct, .Value:
+      stack_entry := ContextStackEntry{data=data, label=data_id}
+      inject_at(&tmpl.context_stack, 0, stack_entry)
+    case .List:
+      inject_list_data_into_context_stack(tmpl, data, offset)
+    case .Nil:
+      stack_entry := ContextStackEntry{data=nil, label=data_id}
+      inject_at(&tmpl.context_stack, 0, stack_entry)
+    }
   }
-
-  // switch _data in data {
-  // case Map:
-  //   stack_entry := ContextStackEntry{data=data, label=data_id}
-  //   inject_at(&tmpl.context_stack, 0, stack_entry)
-  // case List:
-  //   inject_list_data_into_context_stack(tmpl, _data, offset)
-  // case string:
-  //   stack_entry := ContextStackEntry{data=data, label=data_id}
-  //   inject_at(&tmpl.context_stack, 0, stack_entry)
-  // }
 }
 
 inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: any, offset: int) {
@@ -436,7 +431,6 @@ inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: any, offset: 
     }
     return
   }
-
 
   // If we have a list with contents, update the closing tag with:
   // 1. The number of iterations to perform
@@ -456,13 +450,19 @@ inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: any, offset: 
 }
 
 list_at :: proc(obj: any, i: int) -> any {
+  obj := obj
   el: any
+
+  if is_union(obj) {
+    obj = reflect.get_union_variant(obj)
+  }
 
   if !is_list(obj) {
     return nil
   }
 
-	type_info := type_info_of(obj.id)
+	// type_info := type_info_of(obj.id)
+  type_info := runtime.type_info_base(type_info_of(obj.id))
   #partial switch info in type_info.variant {
 	case runtime.Type_Info_Array:
     return reflect.index(obj, i)
@@ -571,41 +571,39 @@ has_key :: proc(obj: any, key: string) -> (has: bool) {
 }
 
 data_type :: proc(obj: any) -> Data_Type {
-  if is_struct(obj) {
+  if reflect.is_nil(obj) {
+    return .Nil
+  } else if is_struct(obj) {
     return .Struct
   } else if is_map(obj) {
     return .Map
   } else if is_list(obj) {
     return .List
-  } else if reflect.is_nil(obj) {
-    return .Nil
   } else {
     return .Value
   }
 }
 
-invert_data :: proc(data: any) -> any {
-  inverted := data
-
+invert_data :: proc(data: any) -> (inverted: any) {
   switch data_type(data) {
   case .Struct, .Map, .List:
     if data_len(data) > 0 {
-      inverted = "false"
+      return runtime.new_clone("false")^
     } else {
-      inverted = "true"
+      return runtime.new_clone("true")^
     }
   case .Value:
-    s := fmt.aprintf("%v", data)  
-    if !_falsey_context[s] {
-      inverted = "false"
+    s := fmt.aprintf("%v", data)
+    if _falsey_context[s] {
+      return runtime.new_clone("true")^
     } else {
-      inverted = "true"
+      return runtime.new_clone("false")^
     }
   case .Nil:
-    inverted = "true"
+    return runtime.new_clone("true")^
   }
 
-  return inverted
+  return runtime.new_clone("false")^
 }
 
 // Finds the closing tag with a given value after
@@ -725,6 +723,9 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
   for i < len(tmpl.lexer.tokens) {
     defer { i += 1 }
     t := tmpl.lexer.tokens[i]
+
+    // NOTE: For some reason this makes everything work!
+    // fmt.println(t)
 
     switch t.type {
     case .Newline, .Text, .Tag, .TagLiteral, .TagLiteralTriple:

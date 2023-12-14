@@ -40,9 +40,6 @@ assert_mustache :: proc(t: ^testing.T,
                         partials := Map{},
                         loc := #caller_location) {
   output, _ := render(input, data, partials)
-  // fmt.println("Input   :", input)
-  // fmt.println("Expected:", exp_output)
-  // fmt.println("Output  :", output)
   testing.expect_value(t, output, exp_output, loc)
 }
 
@@ -117,53 +114,47 @@ test_comments_spec :: proc(t: ^testing.T) {
   }
 }
 
-// @(test)
-// test_sections_spec :: proc(t: ^testing.T) {
-//   spec := load_spec(SECTIONS_SPEC)
-//   defer json.destroy_value(spec)
+@(test)
+test_sections_spec :: proc(t: ^testing.T) {
+  spec := load_spec(SECTIONS_SPEC)
+  defer json.destroy_value(spec)
 
-//   root := spec.(json.Object)
-//   tests := root["tests"].(json.Array)
+  root := spec.(json.Object)
+  tests := root["tests"].(json.Array)
 
-//   for test, i in tests {
-//     test_obj := test.(json.Object)
-//     test_name := test_obj["name"].(string)
-//     test_desc := test_obj["desc"].(string)
-//     template := test_obj["template"].(string)
-//     exp_output := test_obj["expected"].(string)
-//     data := test_obj["data"]
-//     input := load_json(data)
+  for test, i in tests {
+    test_obj := test.(json.Object)
+    test_name := test_obj["name"].(string)
+    test_desc := test_obj["desc"].(string)
+    template := test_obj["template"].(string)
+    exp_output := test_obj["expected"].(string)
+    data := test_obj["data"]
+    input := load_json(data)
 
-//     // TODO: Only print the name & desc if the test FAILS.
-//     // fmt.println("*************************")
-//     // fmt.println(test_name, "-", test_desc)
-//     // fmt.println(data)
-//     // fmt.println("Input:", template)
-//     // fmt.println("Expected:", exp_output)
-//     assert_mustache(t, template, input, exp_output)
-//   }
-// }
+    assert_mustache(t, template, input, exp_output)
+  }
+}
 
-// @(test)
-// test_inverted_spec :: proc(t: ^testing.T) {
-//   spec := load_spec(INVERTED_SPEC)
-//   defer json.destroy_value(spec)
+@(test)
+test_inverted_spec :: proc(t: ^testing.T) {
+  spec := load_spec(INVERTED_SPEC)
+  defer json.destroy_value(spec)
 
-//   root := spec.(json.Object)
-//   tests := root["tests"].(json.Array)
+  root := spec.(json.Object)
+  tests := root["tests"].(json.Array)
 
-//   for test, i in tests {
-//     test_obj := test.(json.Object)
-//     test_name := test_obj["name"].(string)
-//     test_desc := test_obj["desc"].(string)
-//     template := test_obj["template"].(string)
-//     exp_output := test_obj["expected"].(string)
-//     data := test_obj["data"]
-//     input := load_json(data)
+  for test, i in tests {
+    test_obj := test.(json.Object)
+    test_name := test_obj["name"].(string)
+    test_desc := test_obj["desc"].(string)
+    template := test_obj["template"].(string)
+    exp_output := test_obj["expected"].(string)
+    data := test_obj["data"]
+    input := load_json(data)
 
-//     assert_mustache(t, template, input, exp_output)
-//   }
-// }
+    assert_mustache(t, template, input, exp_output)
+  }
+}
 
 // @(test)
 // test_partials_spec :: proc(t: ^testing.T) {
