@@ -4,12 +4,25 @@ import "core:fmt"
 import "core:mem"
 import "core:os"
 
+// All data provided will either be:
+// 1. A string
+// 2. A mapping from string => string
+// 3. A mapping from string => more Data
+// 4. An array of Data?
+Map :: distinct map[string]Data
+List :: distinct [dynamic]Data
+Data :: union {
+  Map,
+  List,
+  string
+}
+
 _main :: proc() -> (err: RenderError) {
   defer free_all(context.temp_allocator)
 
   input := "tmp/test.txt"
-  data := Map {
-    "names" = List{"Ben", "Jono", "Sarah", "Phil"}
+  data := map[string][dynamic]string {
+    "names" = [dynamic]string{"Ben", "Jono", "Sarah", "Phil"}
   }
 
   fmt.printf("====== RENDERING\n")

@@ -3,6 +3,8 @@ package mustache
 import "core:fmt"
 import "core:mem"
 import "core:os"
+import "core:reflect"
+import "core:runtime"
 import "core:slice"
 import "core:strings"
 
@@ -15,6 +17,15 @@ HTML_GREATER_THAN :: "&gt;"
 HTML_QUOTE :: "&quot;"
 HTML_AMPERSAND :: "&amp;"
 
+Data_Error :: enum {
+	None,
+	Unsupported_Type,
+}
+
+Error :: union {
+	Data_Error,
+}
+
 RenderError :: union {
   LexerError
 }
@@ -25,29 +36,24 @@ LexerError :: union {
 
 UnbalancedTags :: struct {}
 
-// All data provided will either be:
-// 1. A string
-// 2. A mapping from string => string
-// 3. A mapping from string => more Data
-// 4. An array of Data?
-Map :: distinct map[string]Data
-List :: distinct [dynamic]Data
-Data :: union {
-  Map,
-  List,
-  string
-}
-
 Template :: struct {
   lexer: Lexer,
-  data: Data,
-  partials: Data,
+  data: any,
+  partials: any,
   context_stack: [dynamic]ContextStackEntry
 }
 
 ContextStackEntry :: struct {
-  data: Data,
+  data: any,
   label: string
+}
+
+Data_Type :: enum {
+  Map,
+  Struct,
+  List,
+  Value,
+  Nil
 }
 
 escape_html_string :: proc(s: string, allocator := context.allocator) -> (string) {
@@ -62,45 +68,186 @@ escape_html_string :: proc(s: string, allocator := context.allocator) -> (string
   return escaped
 }
 
-data_get_string :: proc(data: string, key: string) -> (Data) {
-  nil_data: Data
-
-  if key == "." {
-    return data
-  } else {
-    return nil_data
-  }
-}
-
-data_get_map :: proc(data: Map, key: string) -> (Data) {
-  return data[key]
-}
-
-data_get_list :: proc(data: List, key: string) -> (Data) {
-  return data
-}
-
-data_get :: proc{data_get_string, data_get_map, data_get_list}
-
-data_dig :: proc(data: Data, keys: []string) -> (Data) {
-  data := data
+dig :: proc(d: any, keys: []string) -> any {
+  d := d
 
   if len(keys) == 0 {
-    return data
+    return d
   }
 
   for key in keys {
-    switch _data in data {
-    case string:
-      data = data_get(_data, key)
-    case Map:
-      data = data_get(_data, key)
-    case List:
-      data = data_get(_data, key)
+    switch data_type(d) {
+    case .Struct:
+      d = struct_get(d, key)
+    case .Map:
+      d, _ = map_get(d, key)
+    case .List:
+      d = d
+    case .Value:
+      if key == "." {
+        d = fmt.aprintf("%v", d) 
+      } else {
+        return nil
+      }
+    case .Nil:
+      return nil
+    case:
+      return nil
     }
   }
 
-  return data
+  return d
+}
+
+// TODO: Add a check and throw an error if NOT a struct?
+struct_get :: proc(obj: any, key: string) -> any {
+  if !is_struct(obj) {
+    return nil
+  }
+
+  obj := obj
+  if is_union(obj) {
+    obj = reflect.get_union_variant(obj)
+  }
+
+  return reflect.struct_field_value_by_name(obj, key)
+}
+
+// Retrieves a value from a map. In mustache.odin, all map keys must be
+// string values because we do not know the type of value inside a tag.
+//
+// Eg., {{name}} -- we assume "name" is either a string key to a map,
+// or the name of a field on a struct.
+map_get :: proc(v: any, map_key: string) -> (dug: any, err: Error) {
+  if !is_map(v) {
+    return nil, .Unsupported_Type
+  }
+
+  m := (^mem.Raw_Map)(v.data)
+  if m == nil {
+    return nil, .Unsupported_Type
+  }
+
+  v := v
+  if is_union(v) {
+    v = reflect.get_union_variant(v)
+  }
+
+  // Use type_info_base to ensure we get the underlying data structure
+  // of a named type if we run into one. Like Map, List, etc.
+  base_tinfo := runtime.type_info_base(type_info_of(v.id))
+  tinfo := base_tinfo.variant.(runtime.Type_Info_Map)
+  map_info := tinfo.map_info
+
+  if map_info == nil {
+    return nil, .Unsupported_Type
+  }
+
+  map_cap := uintptr(runtime.map_cap(m^))
+  ks, vs, hs, _, _ := runtime.map_kvh_data_dynamic(m^, map_info)
+
+  for bucket_index in 0..<map_cap {
+    runtime.map_hash_is_valid(hs[bucket_index]) or_continue
+
+    // Accessing string type in key
+    key_ptr := rawptr(runtime.map_cell_index_dynamic(ks, map_info.ks, bucket_index))
+    key_any := any{key_ptr, tinfo.key.id}
+    key_info := runtime.type_info_base(type_info_of(key_any.id))
+    key_info_any := any{key_any.data, key_info.id}
+    key: string
+
+    // Validate that the map keys must be of a string or cstring type.
+    #partial switch tinfo in key_info.variant {
+    case runtime.Type_Info_String:
+      switch s in key_info_any {
+      case string: key = s
+      case cstring: key = string(s)
+      }
+    case: return nil, .Unsupported_Type
+    }
+
+    // Access the value.
+    value_ptr := rawptr(runtime.map_cell_index_dynamic(vs, map_info.vs, bucket_index))
+    value_any := any{value_ptr, tinfo.value.id}
+    value_info := runtime.type_info_base(type_info_of(value_any.id))
+    value_info_any := any{value_any.data, value_info.id}
+    value := value_info_any
+
+    // TODO: Do we need to type check the value? I don't think so.
+    // #partial switch tinfo in value_info.variant {
+    // case runtime.Type_Info_String:
+    //   switch s in value_info_any {
+    //   case string: value = s
+    //   case cstring: value = string(s)
+    //   }
+    //   fmt.println("string value", value)
+    // case runtime.Type_Info_Slice:
+    //   fmt.println("slice value", v)
+    // case runtime.Type_Info_Dynamic_Array:
+    //   fmt.println("dynamic_array value", v)
+    // case: return nil, .Unsupported_Type
+    // }
+
+    if map_key == key {
+      return value, nil
+    }
+  }
+
+  return nil, nil
+}
+
+is_struct :: proc(obj: any) -> bool {
+  tid: typeid
+  tinfo: ^runtime.Type_Info
+
+  if is_union(obj) {
+    tid = reflect.union_variant_typeid(obj)
+  } else {
+    tid = obj.id
+  }
+
+  tinfo = type_info_of(tid)
+  return reflect.is_struct(tinfo)
+}
+
+is_union :: proc(obj: any) -> bool {
+  tinfo: ^runtime.Type_Info
+  base_tinfo: ^runtime.Type_Info
+
+  tinfo = type_info_of(obj.id)
+  base_tinfo = runtime.type_info_base(tinfo)
+  return reflect.type_kind(base_tinfo.id) == reflect.Type_Kind.Union
+}
+
+is_map :: proc(obj: any) -> bool {
+  tinfo: ^runtime.Type_Info
+  id: typeid
+
+  if is_union(obj) {
+    id = reflect.union_variant_typeid(obj)
+  } else {
+    id = obj.id
+  }
+
+  tinfo = type_info_of(id)
+  return reflect.is_dynamic_map(tinfo)
+}
+
+is_list :: proc(obj: any) -> bool {
+  tinfo: ^runtime.Type_Info
+  id: typeid
+
+  if is_union(obj) {
+    id = reflect.union_variant_typeid(obj)
+  } else {
+    id = obj.id
+  }
+
+  tinfo = type_info_of(id)
+  return reflect.is_array(tinfo) ||
+         reflect.is_enumerated_array(tinfo) ||
+         reflect.is_dynamic_array(tinfo) ||
+         reflect.is_slice(tinfo)
 }
 
 // Checks if a string is plain whitespace.
@@ -156,13 +303,14 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
     return true
   }
 
-  switch _data in stack_entry.data {
-  case Map:
-    return len(_data) > 0
-  case List:
-    return len(_data) > 0 
-  case string:
-    return !_falsey_context[_data]
+  switch data_type(stack_entry.data) {
+  case .Map, .List, .Struct:
+    return data_len(stack_entry.data) > 0
+  case .Value:
+    s := fmt.aprintf("%v", stack_entry.data)
+    return !_falsey_context[s]
+  case .Nil:
+    return false
   }
 
   return false
@@ -172,9 +320,9 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   TODO: Update return value to (string, bool) and add an appropriate
         error and message during the string confirmation phase.
 */
-template_stack_extract :: proc(tmpl: ^Template, token: Token) -> (string) {
+string_for_template_insertion :: proc(tmpl: ^Template, token: Token) -> (string) {
   str: string
-  resolved: Data
+  resolved: any
   ok: bool
 
   if token.value == "." {
@@ -184,7 +332,7 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token) -> (string) {
     // dig from the layer beneath the top.
     ids := strings.split(token.value, ".", allocator=context.temp_allocator)
     for ctx in tmpl.context_stack {
-      resolved = data_dig(ctx.data, ids[0:1])
+      resolved = dig(ctx.data, ids[0:1])
       if resolved != nil {
         break
       }
@@ -192,25 +340,28 @@ template_stack_extract :: proc(tmpl: ^Template, token: Token) -> (string) {
 
     // Apply "dotted name resolution" if we have parts after the core ID.
     if len(ids[1:]) > 0 {
-      resolved = data_dig(resolved, ids[1:])
-      r, ok := resolved.(Map)
-      if ok && slice.last(ids[:]) in r {
-        resolved = r[slice.last(ids[:])]
+      last := slice.last(ids[:])
+      last_slice := ids[len(ids)-1:]
+      resolved = dig(resolved, ids[1:])
+      if is_map(resolved) || is_struct(resolved) && has_key(resolved, last) {
+        resolved = dig(resolved, last_slice)
       }
     }
   }
 
-  // TODO: When adding types, make sure that the value is NOT
-  // a Map or a List, instead. We want a single value here.
-  // Make sure that the final value is a single value. If not,
-  // raise error.
-  str, ok = resolved.(string)
-  if !ok {
+
+  s: string
+  switch data_type(resolved) {
+  case .Struct, .Map, .List:
     fmt.println("Could not resolve", resolved, "to a value.")
-    return ""
+    s = ""
+  case .Value:
+    s = fmt.aprintf("%v", resolved)
+  case .Nil:
+    s = ""
   }
 
-  return str
+  return s
 }
 
 template_print_stack :: proc(tmpl: ^Template) {
@@ -220,18 +371,18 @@ template_print_stack :: proc(tmpl: ^Template) {
   }
 }
 
-get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: Data) {
+get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: any) {
   ids := strings.split(data_id, ".")
   defer delete(ids)
 
   // New stack entries always need to resolve against the current top
   // of the stack entry.
-  data = data_dig(tmpl.context_stack[0].data, ids)
+  data = dig(tmpl.context_stack[0].data, ids)
 
   // If we couldn't resolve against the top of the stack, add from the root.
   if data == nil {
     root_stack_entry := tmpl.context_stack[len(tmpl.context_stack)-1]
-    data = data_dig(root_stack_entry.data, ids)
+    data = dig(root_stack_entry.data, ids)
   }
 
   // If we still can't find anything, mark this section as false-y.
@@ -250,19 +401,28 @@ template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
     data = invert_data(data)
   }
 
-  switch _data in data {
-  case Map:
+  switch data_type(data) {
+  case .Map, .Struct, .Value:
     stack_entry := ContextStackEntry{data=data, label=data_id}
     inject_at(&tmpl.context_stack, 0, stack_entry)
-  case List:
-    inject_list_data_into_context_stack(tmpl, _data, offset)
-  case string:
-    stack_entry := ContextStackEntry{data=data, label=data_id}
-    inject_at(&tmpl.context_stack, 0, stack_entry)
+  case .List:
+    inject_list_data_into_context_stack(tmpl, data, offset)
+  case .Nil:
   }
+
+  // switch _data in data {
+  // case Map:
+  //   stack_entry := ContextStackEntry{data=data, label=data_id}
+  //   inject_at(&tmpl.context_stack, 0, stack_entry)
+  // case List:
+  //   inject_list_data_into_context_stack(tmpl, _data, offset)
+  // case string:
+  //   stack_entry := ContextStackEntry{data=data, label=data_id}
+  //   inject_at(&tmpl.context_stack, 0, stack_entry)
+  // }
 }
 
-inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: List, offset: int) {
+inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: any, offset: int) {
   section_open := tmpl.lexer.tokens[offset]
   section_name := section_open.value
   start_chunk := offset + 1
@@ -270,7 +430,7 @@ inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: List, offset:
 
   // Remove the original chunk from the token list if the list is empty.
   // We treat empty lists as false-y values.
-  if len(list) == 0 {
+  if data_len(list) == 0 {
     for _ in start_chunk..<end_chunk {
       ordered_remove(&tmpl.lexer.tokens, start_chunk)
     }
@@ -282,40 +442,167 @@ inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: List, offset:
   // 1. The number of iterations to perform
   // 2. The position of the start of the loop (eg., .SectionOpen tag)
   section_close := tmpl.lexer.tokens[end_chunk]
-  section_close.iters = len(list) - 1
+  section_close.iters = data_len(list) - 1
   section_close.start_i = offset
   tmpl.lexer.tokens[end_chunk] = section_close
 
   // Add each element of the list to the context stack. Add the data in
   // reverse order of the list, so that the first entry is at the top.
   for i := section_close.iters; i >= 0; i -= 1 {
-    stack_entry := ContextStackEntry{data=list[i], label="TEMP LIST"}
+    el := list_at(list, i)
+    stack_entry := ContextStackEntry{data=el, label="TEMP LIST"}
     inject_at(&tmpl.context_stack, 0, stack_entry)
   }
 }
 
-invert_data :: proc(data: Data) -> (Data) {
+list_at :: proc(obj: any, i: int) -> any {
+  el: any
+
+  if !is_list(obj) {
+    return nil
+  }
+
+	type_info := type_info_of(obj.id)
+  #partial switch info in type_info.variant {
+	case runtime.Type_Info_Array:
+    return reflect.index(obj, i)
+	case runtime.Type_Info_Slice:
+    return reflect.index(obj, i)
+	case runtime.Type_Info_Dynamic_Array:
+    return reflect.index(obj, i)
+  }
+
+  return el
+}
+
+data_len :: proc(obj: any) -> int {
+  obj := obj
+  l: int
+
+  if is_union(obj) {
+    obj = reflect.get_union_variant(obj)
+  }
+
+  switch data_type(obj) {
+  case .Struct:
+    l = len(reflect.struct_field_names(obj.id))
+  case .Map, .List, .Value:
+    l = reflect.length(obj)
+  case .Nil:
+    l = 0
+  }
+
+  return l
+}
+
+map_has_key :: proc(v: any, map_key: string) -> (has: bool) {
+  if !is_map(v) {
+    return false
+  }
+
+  m := (^mem.Raw_Map)(v.data)
+  if m == nil {
+    return false
+  }
+
+  v := v
+  if is_union(v) {
+    v = reflect.get_union_variant(v)
+  }
+
+  // Use type_info_base to ensure we get the underlying data structure
+  // of a named type if we run into one. Like Map, List, etc.
+  base_tinfo := runtime.type_info_base(type_info_of(v.id))
+  tinfo := base_tinfo.variant.(runtime.Type_Info_Map)
+  map_info := tinfo.map_info
+
+  if map_info == nil {
+    return false
+  }
+
+  map_cap := uintptr(runtime.map_cap(m^))
+  ks, vs, hs, _, _ := runtime.map_kvh_data_dynamic(m^, map_info)
+
+  for bucket_index in 0..<map_cap {
+    runtime.map_hash_is_valid(hs[bucket_index]) or_continue
+
+    // Accessing string type in key
+    key_ptr := rawptr(runtime.map_cell_index_dynamic(ks, map_info.ks, bucket_index))
+    key_any := any{key_ptr, tinfo.key.id}
+    key_info := runtime.type_info_base(type_info_of(key_any.id))
+    key_info_any := any{key_any.data, key_info.id}
+    key: string
+
+    // Validate that the map keys must be of a string or cstring type.
+    #partial switch tinfo in key_info.variant {
+    case runtime.Type_Info_String:
+      switch s in key_info_any {
+      case string: key = s
+      case cstring: key = string(s)
+      }
+    case: return false
+    }
+
+    if map_key == key {
+      return true
+    }
+  }
+
+  return false
+}
+
+has_key :: proc(obj: any, key: string) -> (has: bool) {
+  obj := obj
+
+  switch data_type(obj) {
+  case .Map:
+    return map_has_key(obj, key)
+  case .Struct:
+    if is_union(obj) {
+      obj = reflect.get_union_variant(obj)
+    }
+    fields := reflect.struct_field_names(obj.id)
+    return slice.contains(fields, key)
+  case .List, .Value, .Nil:
+    return false
+  }
+
+  return has
+}
+
+data_type :: proc(obj: any) -> Data_Type {
+  if is_struct(obj) {
+    return .Struct
+  } else if is_map(obj) {
+    return .Map
+  } else if is_list(obj) {
+    return .List
+  } else if reflect.is_nil(obj) {
+    return .Nil
+  } else {
+    return .Value
+  }
+}
+
+invert_data :: proc(data: any) -> any {
   inverted := data
 
-  switch _data in data {
-  case Map:
-    if len(_data) > 0 {
+  switch data_type(data) {
+  case .Struct, .Map, .List:
+    if data_len(data) > 0 {
       inverted = "false"
     } else {
       inverted = "true"
     }
-  case List:
-    if len(_data) > 0 {
+  case .Value:
+    s := fmt.aprintf("%v", data)  
+    if !_falsey_context[s] {
       inverted = "false"
     } else {
       inverted = "true"
     }
-  case string:
-    if !_falsey_context[_data] {
-      inverted = "false"
-    } else {
-      inverted = "true"
-    }
+  case .Nil:
+    inverted = "true"
   }
 
   return inverted
@@ -351,10 +638,10 @@ token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
       s = t.value
     }
   case .Tag:
-    s = template_stack_extract(tmpl, t)
+    s = string_for_template_insertion(tmpl, t)
     s = escape_html_string(s)
   case .TagLiteral, .TagLiteralTriple:
-    s = template_stack_extract(tmpl, t)
+    s = string_for_template_insertion(tmpl, t)
   case .Newline:
     s = "\n"
   case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment, .Skip, .EOF, .Partial:
@@ -373,7 +660,7 @@ template_insert_partial :: proc(
   offset: int
 ) -> (err: LexerError) {
   partial_name := token.value
-  partial_content := data_dig(tmpl.partials, []string{partial_name})
+  partial_content := dig(tmpl.partials, []string{partial_name})
 
   data, ok := partial_content.(string)
   if !ok {
@@ -446,7 +733,6 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
       }
     case .SectionOpen, .SectionOpenInverted:
       template_add_to_context_stack(tmpl, t, i)
-      // lexer_print_tokens(tmpl.lexer)
     case .SectionClose:
       template_pop_from_context_stack(tmpl)
       if t.iters > 0 {
@@ -466,7 +752,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
 
 render :: proc(
   input: string,
-  data: Data,
+  data: any,
   partials := Map{}
 ) -> (s: string, err: RenderError) {
   lexer := Lexer{src=input, delim=CORE_DEF}
@@ -484,7 +770,7 @@ render :: proc(
 
 render_from_filename :: proc(
   filename: string,
-  data: Data
+  data: any
 ) -> (s: string, err: RenderError) {
   src, _ := os.read_entire_file_from_filename(filename)
   str := string(src)
@@ -493,8 +779,6 @@ render_from_filename :: proc(
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
   parse(&lexer) or_return
-
-  lexer_print_tokens(lexer)
 
   partials := Map{}
   template := Template{lexer=lexer, data=data, partials=partials}
