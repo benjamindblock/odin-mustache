@@ -156,52 +156,52 @@ test_inverted_spec :: proc(t: ^testing.T) {
   }
 }
 
+@(test)
+test_partials_spec :: proc(t: ^testing.T) {
+  spec := load_spec(PARTIALS_SPEC)
+  defer json.destroy_value(spec)
+
+  root := spec.(json.Object)
+  tests := root["tests"].(json.Array)
+
+  for test, i in tests {
+    test_obj := test.(json.Object)
+    template := test_obj["template"].(string)
+    exp_output := test_obj["expected"].(string)
+    data := test_obj["data"]
+    input := load_json(data)
+    partials := test_obj["partials"]
+    partials_input := load_json(partials).(Map)
+    assert_mustache(t, template, input, exp_output, partials_input)
+  }
+}
+
 // @(test)
-// test_partials_spec :: proc(t: ^testing.T) {
-//   spec := load_spec(PARTIALS_SPEC)
+// test_delimiters_spec :: proc(t: ^testing.T) {
+//   spec := load_spec(DELIMITERS_SPEC)
 //   defer json.destroy_value(spec)
 
 //   root := spec.(json.Object)
 //   tests := root["tests"].(json.Array)
 
 //   for test, i in tests {
+//     if i > 0 do break
+
 //     test_obj := test.(json.Object)
+//     test_name := test_obj["name"].(string)
+//     test_desc := test_obj["desc"].(string)
 //     template := test_obj["template"].(string)
 //     exp_output := test_obj["expected"].(string)
 //     data := test_obj["data"]
 //     input := load_json(data)
+
+//     // Not all the test cases have partials.
 //     partials := test_obj["partials"]
-//     partials_input := load_json(partials).(Map)
+//     partials_input, ok := load_json(partials).(Map)
+//     if !ok {
+//       partials_input = Map{}
+//     }
+
 //     assert_mustache(t, template, input, exp_output, partials_input)
 //   }
 // }
-
-// // @(test)
-// // test_delimiters_spec :: proc(t: ^testing.T) {
-// //   spec := load_spec(DELIMITERS_SPEC)
-// //   defer json.destroy_value(spec)
-
-// //   root := spec.(json.Object)
-// //   tests := root["tests"].(json.Array)
-
-// //   for test, i in tests {
-// //     if i > 0 do break
-
-// //     test_obj := test.(json.Object)
-// //     test_name := test_obj["name"].(string)
-// //     test_desc := test_obj["desc"].(string)
-// //     template := test_obj["template"].(string)
-// //     exp_output := test_obj["expected"].(string)
-// //     data := test_obj["data"]
-// //     input := load_json(data)
-
-// //     // Not all the test cases have partials.
-// //     partials := test_obj["partials"]
-// //     partials_input, ok := load_json(partials).(Map)
-// //     if !ok {
-// //       partials_input = Map{}
-// //     }
-
-// //     assert_mustache(t, template, input, exp_output, partials_input)
-// //   }
-// // }

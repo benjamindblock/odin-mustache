@@ -320,17 +320,17 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   TODO: Update return value to (string, bool) and add an appropriate
         error and message during the string confirmation phase.
 */
-string_for_template_insertion :: proc(tmpl: ^Template, token: Token) -> (string) {
+string_for_template_insertion :: proc(tmpl: ^Template, key: string) -> (string) {
   str: string
   resolved: any
   ok: bool
 
-  if token.value == "." {
+  if key == "." {
     resolved = tmpl.context_stack[0].data
   } else {
     // If the top of the stack is a string and we need to access a hash of data,
     // dig from the layer beneath the top.
-    ids := strings.split(token.value, ".", allocator=context.temp_allocator)
+    ids := strings.split(key, ".", allocator=context.temp_allocator)
     for ctx in tmpl.context_stack {
       resolved = dig(ctx.data, ids[0:1])
       if resolved != nil {
@@ -636,10 +636,10 @@ token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
       s = t.value
     }
   case .Tag:
-    s = string_for_template_insertion(tmpl, t)
+    s = string_for_template_insertion(tmpl, t.value)
     s = escape_html_string(s)
   case .TagLiteral, .TagLiteralTriple:
-    s = string_for_template_insertion(tmpl, t)
+    s = string_for_template_insertion(tmpl, t.value)
   case .Newline:
     s = "\n"
   case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment, .Skip, .EOF, .Partial:
@@ -660,11 +660,22 @@ template_insert_partial :: proc(
   partial_name := token.value
   partial_content := dig(tmpl.partials, []string{partial_name})
 
-  data, ok := partial_content.(string)
-  if !ok {
+  data: string
+  switch data_type(partial_content) {
+  case .Struct, .Map, .List:
     fmt.println("Could not find partial content.")
     return
+  case .Value:
+    data = fmt.aprintf("%v", partial_content)
+  case .Nil:
+    data = ""
   }
+
+  // data, ok := partial_content.(string)
+  // if !ok {
+  //   fmt.println("Could not find partial content.")
+  //   return
+  // }
 
   lexer := Lexer{src=data, line=token.pos.line, delim=CORE_DEF}
   parse(&lexer) or_return
@@ -723,9 +734,6 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
   for i < len(tmpl.lexer.tokens) {
     defer { i += 1 }
     t := tmpl.lexer.tokens[i]
-
-    // NOTE: For some reason this makes everything work!
-    // fmt.println(t)
 
     switch t.type {
     case .Newline, .Text, .Tag, .TagLiteral, .TagLiteralTriple:
