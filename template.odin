@@ -17,9 +17,13 @@ HTML_GREATER_THAN :: "&gt;"
 HTML_QUOTE :: "&quot;"
 HTML_AMPERSAND :: "&amp;"
 
+TRUE :: "true"
+FALSEY :: "false"
+
 Data_Error :: enum {
 	None,
 	Unsupported_Type,
+  MapKeyNotFound
 }
 
 Error :: union {
@@ -27,8 +31,11 @@ Error :: union {
 }
 
 RenderError :: union {
-  LexerError
+  LexerError,
+  TemplateError
 }
+
+TemplateError :: struct {}
 
 LexerError :: union {
   UnbalancedTags
@@ -85,13 +92,11 @@ dig :: proc(d: any, keys: []string) -> any {
       d = d
     case .Value:
       if key == "." {
-        d = fmt.aprintf("%v", d) 
+        d = fmt.tprintf("%v", d) 
       } else {
         return nil
       }
     case .Nil:
-      return nil
-    case:
       return nil
     }
   }
@@ -99,7 +104,6 @@ dig :: proc(d: any, keys: []string) -> any {
   return d
 }
 
-// TODO: Add a check and throw an error if NOT a struct?
 struct_get :: proc(obj: any, key: string) -> any {
   if !is_struct(obj) {
     return nil
@@ -149,21 +153,24 @@ map_get :: proc(v: any, map_key: string) -> (dug: any, err: Error) {
   for bucket_index in 0..<map_cap {
     runtime.map_hash_is_valid(hs[bucket_index]) or_continue
 
-    // Accessing string type in key
+    // Accessing the map key.
     key_ptr := rawptr(runtime.map_cell_index_dynamic(ks, map_info.ks, bucket_index))
     key_any := any{key_ptr, tinfo.key.id}
     key_info := runtime.type_info_base(type_info_of(key_any.id))
     key_info_any := any{key_any.data, key_info.id}
     key: string
 
-    // Validate that the map keys must be of a string or cstring type.
+    // Keys can only be of a string type.
     #partial switch tinfo in key_info.variant {
     case runtime.Type_Info_String:
       switch s in key_info_any {
-      case string: key = s
-      case cstring: key = string(s)
+      case string:
+        key = s
+      case cstring:
+        key = string(s)
       }
-    case: return nil, .Unsupported_Type
+    case:
+      return nil, .Unsupported_Type
     }
 
     // Access the value.
@@ -173,29 +180,15 @@ map_get :: proc(v: any, map_key: string) -> (dug: any, err: Error) {
     value_info_any := any{value_any.data, value_info.id}
     value := value_info_any
 
-    // TODO: Do we need to type check the value? I don't think so.
-    // #partial switch tinfo in value_info.variant {
-    // case runtime.Type_Info_String:
-    //   switch s in value_info_any {
-    //   case string: value = s
-    //   case cstring: value = string(s)
-    //   }
-    //   fmt.println("string value", value)
-    // case runtime.Type_Info_Slice:
-    //   fmt.println("slice value", v)
-    // case runtime.Type_Info_Dynamic_Array:
-    //   fmt.println("dynamic_array value", v)
-    // case: return nil, .Unsupported_Type
-    // }
-
     if map_key == key {
       return value, nil
     }
   }
 
-  return nil, nil
+  return nil, .MapKeyNotFound
 }
 
+// Checks if an 'any' object is a struct of some kind.
 is_struct :: proc(obj: any) -> bool {
   tid: typeid
   tinfo: ^runtime.Type_Info
@@ -210,6 +203,7 @@ is_struct :: proc(obj: any) -> bool {
   return reflect.is_struct(tinfo)
 }
 
+// Checks if an 'any' object is a union of some kind.
 is_union :: proc(obj: any) -> bool {
   tinfo: ^runtime.Type_Info
   base_tinfo: ^runtime.Type_Info
@@ -219,6 +213,7 @@ is_union :: proc(obj: any) -> bool {
   return reflect.type_kind(base_tinfo.id) == reflect.Type_Kind.Union
 }
 
+// Checks if an 'any' object is a map of some kind.
 is_map :: proc(obj: any) -> bool {
   tinfo: ^runtime.Type_Info
   id: typeid
@@ -233,6 +228,7 @@ is_map :: proc(obj: any) -> bool {
   return reflect.is_dynamic_map(tinfo)
 }
 
+// Checks if an 'any' object is a list of some kind.
 is_list :: proc(obj: any) -> bool {
   tinfo: ^runtime.Type_Info
   id: typeid
@@ -245,7 +241,6 @@ is_list :: proc(obj: any) -> bool {
 
   tinfo = type_info_of(id)
   return reflect.is_array(tinfo) ||
-         reflect.is_enumerated_array(tinfo) ||
          reflect.is_dynamic_array(tinfo) ||
          reflect.is_slice(tinfo)
 }
@@ -261,40 +256,34 @@ is_text_blank :: proc(s: string) -> (res: bool) {
   return true
 }
 
-/*
-  Returns true if the value is one of the "falsey" values
-  for a context.
-*/
+// Returns true if the value is one of the "falsey" values
+// for a context.
 @(private) _falsey_context := map[string]bool{
-  "false" = true,
+  FALSEY = true,
   "null" = true,
   "" = true
 }
 
-/*
-  Returns true if the value is one of the "falsey" values
-  for a context.
-*/
+// Returns true if the value is one of the "falsey" values
+// for a context.
 @(private) _whitespace := map[rune]bool{
   ' ' = true,
   '\t' = true,
   '\r' = true
 }
 
-/*
-  Sections can have false-y values in their corresponding data. When this
-  is the case, the section should not be rendered. Example:
+// Sections can have false-y values in their corresponding data. When this
+// is the case, the section should not be rendered. Example:
 
-  input := "\"{{#boolean}}This should not be rendered.{{/boolean}}\""
-  data := Map {
-    "boolean" = "false"
-  }
+// input := "\"{{#boolean}}This should not be rendered.{{/boolean}}\""
+// data := Map {
+//   "boolean" = "false"
+// }
 
-  Valid contexts are:
-    - Map with at least one key
-    - List with at least one element
-    - string NOT in the _falsey_context mapping
-*/
+// Valid contexts are:
+//   - Map with at least one key
+//   - List with at least one element
+//   - string NOT in the _falsey_context mapping
 token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool) {
   stack_entry := tmpl.context_stack[0]
 
@@ -307,7 +296,7 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   case .Map, .List, .Struct:
     return data_len(stack_entry.data) > 0
   case .Value:
-    s := fmt.aprintf("%v", stack_entry.data)
+    s := fmt.tprintf("%v", stack_entry.data)
     return !_falsey_context[s]
   case .Nil:
     return false
@@ -316,14 +305,8 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   return false
 }
 
-/*
-  TODO: Update return value to (string, bool) and add an appropriate
-        error and message during the string confirmation phase.
-*/
-string_for_template_insertion :: proc(tmpl: ^Template, key: string) -> (string) {
-  str: string
+string_for_template_insertion :: proc(tmpl: ^Template, key: string) -> (s: string) {
   resolved: any
-  ok: bool
 
   if key == "." {
     resolved = tmpl.context_stack[0].data
@@ -349,18 +332,7 @@ string_for_template_insertion :: proc(tmpl: ^Template, key: string) -> (string) 
     }
   }
 
-
-  s: string
-  switch data_type(resolved) {
-  case .Struct, .Map, .List:
-    fmt.println("Could not resolve", resolved, "to a value.")
-    s = ""
-  case .Value:
-    s = fmt.aprintf("%v", resolved)
-  case .Nil:
-    s = ""
-  }
-
+  s, _ = any_to_string(resolved)
   return s
 }
 
@@ -371,6 +343,7 @@ template_print_stack :: proc(tmpl: ^Template) {
   }
 }
 
+// Retrieves data to place on the context stack.
 get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: any) {
   ids := strings.split(data_id, ".")
   defer delete(ids)
@@ -387,12 +360,14 @@ get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: any) {
 
   // If we still can't find anything, mark this section as false-y.
   if reflect.is_nil(data) {
-    return runtime.new_clone("false")^
+    return runtime.new_clone(FALSEY)^
   } else {
     return data
   }
 }
 
+// Adds a new entry to the Template's context_stack. This occurs
+// when we encounter a .SectionOpen tag.
 template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
   data_id := t.value
   data := get_data_for_stack(tmpl, data_id)
@@ -449,9 +424,10 @@ inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: any, offset: 
   }
 }
 
+// Retrieves an element from a list (can be of any type -- array,
+// dynamic array, slice) at a given index.
 list_at :: proc(obj: any, i: int) -> any {
   obj := obj
-  el: any
 
   if is_union(obj) {
     obj = reflect.get_union_variant(obj)
@@ -461,23 +437,12 @@ list_at :: proc(obj: any, i: int) -> any {
     return nil
   }
 
-	// type_info := type_info_of(obj.id)
-  type_info := runtime.type_info_base(type_info_of(obj.id))
-  #partial switch info in type_info.variant {
-	case runtime.Type_Info_Array:
-    return reflect.index(obj, i)
-	case runtime.Type_Info_Slice:
-    return reflect.index(obj, i)
-	case runtime.Type_Info_Dynamic_Array:
-    return reflect.index(obj, i)
-  }
-
-  return el
+  return reflect.index(obj, i)
 }
 
-data_len :: proc(obj: any) -> int {
+// Gets the length of a given object.
+data_len :: proc(obj: any) -> (l: int) {
   obj := obj
-  l: int
 
   if is_union(obj) {
     obj = reflect.get_union_variant(obj)
@@ -489,12 +454,12 @@ data_len :: proc(obj: any) -> int {
   case .Map, .List, .Value:
     l = reflect.length(obj)
   case .Nil:
-    l = 0
   }
 
   return l
 }
 
+// Checks if a map has a given key.
 map_has_key :: proc(v: any, map_key: string) -> (has: bool) {
   if !is_map(v) {
     return false
@@ -537,10 +502,13 @@ map_has_key :: proc(v: any, map_key: string) -> (has: bool) {
     #partial switch tinfo in key_info.variant {
     case runtime.Type_Info_String:
       switch s in key_info_any {
-      case string: key = s
-      case cstring: key = string(s)
+      case string:
+        key = s
+      case cstring:
+        key = string(s)
       }
-    case: return false
+    case:
+      return false
     }
 
     if map_key == key {
@@ -570,6 +538,7 @@ has_key :: proc(obj: any, key: string) -> (has: bool) {
   return has
 }
 
+// Get the data type of an object.
 data_type :: proc(obj: any) -> Data_Type {
   if reflect.is_nil(obj) {
     return .Nil
@@ -584,26 +553,33 @@ data_type :: proc(obj: any) -> Data_Type {
   }
 }
 
-invert_data :: proc(data: any) -> (inverted: any) {
+// Inverts a piece of data. If it has any content, then return a
+// falsey value. Otherwise, a truthful value.
+invert_data :: proc(data: any) -> any {
+  s: string
+
   switch data_type(data) {
   case .Struct, .Map, .List:
     if data_len(data) > 0 {
-      return runtime.new_clone("false")^
+      s = FALSEY
     } else {
-      return runtime.new_clone("true")^
+      s = TRUE
     }
   case .Value:
-    s := fmt.aprintf("%v", data)
-    if _falsey_context[s] {
-      return runtime.new_clone("true")^
+    if _falsey_context[fmt.tprintf("%v", data)] {
+      s = TRUE
     } else {
-      return runtime.new_clone("false")^
+      s = FALSEY
     }
   case .Nil:
-    return runtime.new_clone("true")^
+    s = TRUE
   }
 
-  return runtime.new_clone("false")^
+  if s == "" {
+    s = FALSEY
+  }
+
+  return runtime.new_clone(s)^
 }
 
 // Finds the closing tag with a given value after
@@ -648,6 +624,20 @@ token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
   return s
 }
 
+any_to_string :: proc(obj: any) -> (s: string, err: RenderError) {
+  switch data_type(obj) {
+  case .Struct, .Map, .List:
+    fmt.println("Could not convert", obj, "to printable content.")
+    return s, TemplateError {}
+  case .Value:
+    s = fmt.aprintf("%v", obj)
+  case .Nil:
+    s = ""
+  }
+
+  return s, nil
+}
+
 /*
   When a .Partial token is encountered, we need to inject the contents
   of the partial into the current list of tokens.
@@ -659,25 +649,13 @@ template_insert_partial :: proc(
 ) -> (err: LexerError) {
   partial_name := token.value
   partial_content := dig(tmpl.partials, []string{partial_name})
+  partial_str, _ := any_to_string(partial_content)
 
-  data: string
-  switch data_type(partial_content) {
-  case .Struct, .Map, .List:
-    fmt.println("Could not find partial content.")
-    return
-  case .Value:
-    data = fmt.aprintf("%v", partial_content)
-  case .Nil:
-    data = ""
+  lexer := Lexer{
+    src=partial_str,
+    line=token.pos.line,
+    delim=CORE_DEF
   }
-
-  // data, ok := partial_content.(string)
-  // if !ok {
-  //   fmt.println("Could not find partial content.")
-  //   return
-  // }
-
-  lexer := Lexer{src=data, line=token.pos.line, delim=CORE_DEF}
   parse(&lexer) or_return
 
   // Performs any indentation on the .Partial that we are inserting.
@@ -715,7 +693,7 @@ template_insert_partial :: proc(
 }
 
 template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) {
-  b: strings.Builder
+  b := strings.builder_make(context.temp_allocator)
 
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
   inject_at(&tmpl.context_stack, 0, root)
@@ -771,8 +749,6 @@ render :: proc(
   parse(&lexer) or_return
 
   template := Template{lexer=lexer, data=data, partials=partials}
-  defer delete(template.context_stack)
-
   text, ok := template_process(&template)
   return text, nil
 }
@@ -782,6 +758,7 @@ render_from_filename :: proc(
   data: any
 ) -> (s: string, err: RenderError) {
   src, _ := os.read_entire_file_from_filename(filename)
+  defer delete(src)
   str := string(src)
 
   lexer := Lexer{src=str, delim=CORE_DEF}

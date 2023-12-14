@@ -3,6 +3,19 @@ package mustache
 import "core:encoding/json"
 import "core:fmt"
 
+// All data provided will either be:
+// 1. A string
+// 2. A mapping from string => string
+// 3. A mapping from string => more Data
+// 4. An array of Data?
+Map :: distinct map[string]Data
+List :: distinct [dynamic]Data
+Data :: union {
+  Map,
+  List,
+  string
+}
+
 load_json :: proc(val: json.Value) -> (loaded: Data) {
   switch _val in val {
   case bool, string:

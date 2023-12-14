@@ -4,33 +4,20 @@ import "core:fmt"
 import "core:mem"
 import "core:os"
 
-// All data provided will either be:
-// 1. A string
-// 2. A mapping from string => string
-// 3. A mapping from string => more Data
-// 4. An array of Data?
-Map :: distinct map[string]Data
-List :: distinct [dynamic]Data
-Data :: union {
-  Map,
-  List,
-  string
-}
-
 _main :: proc() -> (err: RenderError) {
   defer free_all(context.temp_allocator)
 
   input := "tmp/test.txt"
-  data := map[string][dynamic]string {
-    "names" = [dynamic]string{"Ben", "Jono", "Sarah", "Phil"}
+  data := map[string][4]string {
+    "names" = [4]string{"Ben", "Jono", "Sarah", "Phil"}
   }
+  defer delete(data)
 
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
   fmt.printf("Data : '%v'\n", data)
   output := render_from_filename(input, data) or_return
   fmt.printf("Output: %v\n", output)
-  fmt.println("")
 
   return nil
 }
