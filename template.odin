@@ -2,7 +2,6 @@ package mustache
 
 import "core:fmt"
 import "core:mem"
-import "core:os"
 import "core:reflect"
 import "core:runtime"
 import "core:slice"
@@ -20,49 +19,6 @@ HTML_AMPERSAND :: "&amp;"
 TRUE :: "true"
 FALSEY :: "false"
 
-Data_Error :: enum {
-	None,
-	Unsupported_Type,
-  MapKeyNotFound
-}
-
-Error :: union {
-	Data_Error,
-}
-
-RenderError :: union {
-  LexerError,
-  TemplateError
-}
-
-TemplateError :: struct {}
-
-LexerError :: union {
-  UnbalancedTags
-}
-
-UnbalancedTags :: struct {}
-
-Template :: struct {
-  lexer: Lexer,
-  data: any,
-  partials: any,
-  context_stack: [dynamic]ContextStackEntry
-}
-
-ContextStackEntry :: struct {
-  data: any,
-  label: string
-}
-
-Data_Type :: enum {
-  Map,
-  Struct,
-  List,
-  Value,
-  Null
-}
-
 escape_html_string :: proc(s: string, allocator := context.allocator) -> (string) {
   context.allocator = allocator
 
@@ -75,6 +31,8 @@ escape_html_string :: proc(s: string, allocator := context.allocator) -> (string
   return escaped
 }
 
+// Given a list of keys, access nested data inside any combination of
+// maps, structs, and lists.
 dig :: proc(d: any, keys: []string) -> any {
   d := d
 
@@ -104,6 +62,7 @@ dig :: proc(d: any, keys: []string) -> any {
   return d
 }
 
+// Gets the value of a struct field.
 struct_get :: proc(obj: any, key: string) -> any {
   if !is_struct(obj) {
     return nil
@@ -122,7 +81,7 @@ struct_get :: proc(obj: any, key: string) -> any {
 //
 // Eg., {{name}} -- we assume "name" is either a string key to a map,
 // or the name of a field on a struct.
-map_get :: proc(v: any, map_key: string) -> (dug: any, err: Error) {
+map_get :: proc(v: any, map_key: string) -> (dug: any, err: Template_Error) {
   if !is_map(v) {
     return nil, .Unsupported_Type
   }
@@ -185,7 +144,7 @@ map_get :: proc(v: any, map_key: string) -> (dug: any, err: Error) {
     }
   }
 
-  return nil, .MapKeyNotFound
+  return nil, .Map_Key_Not_Found
 }
 
 // Checks if an 'any' object is a struct of some kind.
@@ -367,12 +326,12 @@ get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: any) {
 }
 
 // Adds a new entry to the Template's context_stack. This occurs
-// when we encounter a .SectionOpen tag.
+// when we encounter a .Section_Open tag.
 template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
   data_id := t.value
   data := get_data_for_stack(tmpl, data_id)
 
-  if t.type == .SectionOpenInverted {
+  if t.type == .Section_Open_Inverted {
     stack_entry := ContextStackEntry{
       data=invert_data(data),
       label=data_id
@@ -409,7 +368,7 @@ inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: any, offset: 
 
   // If we have a list with contents, update the closing tag with:
   // 1. The number of iterations to perform
-  // 2. The position of the start of the loop (eg., .SectionOpen tag)
+  // 2. The position of the start of the loop (eg., .Section_Open tag)
   section_close := tmpl.lexer.tokens[end_chunk]
   section_close.iters = data_len(list) - 1
   section_close.start_i = offset
@@ -590,7 +549,7 @@ template_find_section_close_tag_index :: proc(
   offset: int
 ) -> (int) {
   for t, i in tmpl.lexer.tokens[offset:] {
-    if t.type == .SectionClose && t.value == label {
+    if t.type == .Section_Close && t.value == label {
       return i + offset
     }
   }
@@ -614,23 +573,23 @@ token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
   case .Tag:
     s = string_for_template_insertion(tmpl, t.value)
     s = escape_html_string(s)
-  case .TagLiteral, .TagLiteralTriple:
+  case .Tag_Literal, .Tag_Literal_Triple:
     s = string_for_template_insertion(tmpl, t.value)
   case .Newline:
     s = "\n"
-  case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment, .Skip, .EOF, .Partial:
+  case .Section_Open, .Section_Open_Inverted, .Section_Close, .Comment, .Skip, .EOF, .Partial:
   }
 
   return s
 }
 
-any_to_string :: proc(obj: any) -> (s: string, err: RenderError) {
+any_to_string :: proc(obj: any) -> (s: string, err: Render_Error) {
   switch data_type(obj) {
   case .Struct, .Map, .List:
     fmt.println("Could not convert", obj, "to printable content.")
-    return s, TemplateError {}
+    return s, Template_Error {}
   case .Value:
-    s = fmt.aprintf("%v", obj)
+    s = fmt.tprintf("%v", obj)
   case .Null:
     s = ""
   }
@@ -646,7 +605,7 @@ template_insert_partial :: proc(
   tmpl: ^Template,
   token: Token,
   offset: int
-) -> (err: LexerError) {
+) -> (err: Lexer_Error) {
   partial_name := token.value
   partial_content := dig(tmpl.partials, []string{partial_name})
   partial_str, _ := any_to_string(partial_content)
@@ -692,7 +651,7 @@ template_insert_partial :: proc(
   return nil
 }
 
-process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) {
+process :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) {
   b := strings.builder_make(context.temp_allocator)
 
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
@@ -714,13 +673,13 @@ process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) {
     t := tmpl.lexer.tokens[i]
 
     switch t.type {
-    case .Newline, .Text, .Tag, .TagLiteral, .TagLiteralTriple:
+    case .Newline, .Text, .Tag, .Tag_Literal, .Tag_Literal_Triple:
       if token_valid_in_template_context(tmpl, t) {
         strings.write_string(&b, token_content(tmpl, t))
       }
-    case .SectionOpen, .SectionOpenInverted:
+    case .Section_Open, .Section_Open_Inverted:
       template_add_to_context_stack(tmpl, t, i)
-    case .SectionClose:
+    case .Section_Close:
       template_pop_from_context_stack(tmpl)
       if t.iters > 0 {
         t.iters -= 1
@@ -735,41 +694,4 @@ process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) {
   }
 
   return strings.to_string(b), nil
-}
-
-render :: proc(
-  input: string,
-  data: any,
-  partials: any
-) -> (s: string, err: RenderError) {
-  lexer := Lexer{src=input, delim=CORE_DEF}
-  defer delete(lexer.tag_stack)
-  defer delete(lexer.tokens)
-
-  parse(&lexer) or_return
-
-  template := Template{lexer=lexer, data=data, partials=partials}
-  text, ok := process(&template)
-  return text, nil
-}
-
-render_from_filename :: proc(
-  filename: string,
-  data: any
-) -> (s: string, err: RenderError) {
-  src, _ := os.read_entire_file_from_filename(filename)
-  defer delete(src)
-  str := string(src)
-
-  lexer := Lexer{src=str, delim=CORE_DEF}
-  defer delete(lexer.tag_stack)
-  defer delete(lexer.tokens)
-  parse(&lexer) or_return
-
-  partials: any
-  template := Template{lexer=lexer, data=data, partials=partials}
-  defer delete(template.context_stack)
-
-  text, ok := process(&template)
-  return text, nil
 }

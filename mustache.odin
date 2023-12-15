@@ -1,22 +1,145 @@
 package mustache
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:mem"
 import "core:os"
 
-_main :: proc() -> (err: RenderError) {
+Render_Error :: union {
+  Lexer_Error,
+  Template_Error,
+  json.Error
+}
+
+render :: proc(
+  input: string,
+  data: any,
+  partials: any
+) -> (s: string, err: Render_Error) {
+  lexer := Lexer{
+    src=input,
+    delim=CORE_DEF
+  }
+  defer delete(lexer.tag_stack)
+  defer delete(lexer.tokens)
+
+  parse(&lexer) or_return
+
+  template := Template {
+    lexer=lexer,
+    data=data,
+    partials=partials
+  }
+  text, ok := process(&template)
+  defer delete(template.context_stack)
+
+  return text, nil
+}
+
+render_from_filename :: proc(
+  filename: string,
+  data: any
+) -> (s: string, err: Render_Error) {
+  src, _ := os.read_entire_file_from_filename(filename)
+  defer delete(src)
+  str := string(src)
+
+  lexer := Lexer {
+    src=str,
+    delim=CORE_DEF
+  }
+  defer delete(lexer.tag_stack)
+  defer delete(lexer.tokens)
+  parse(&lexer) or_return
+
+  partials: any
+  template := Template {
+    lexer=lexer,
+    data=data,
+    partials=partials
+  }
+  defer delete(template.context_stack)
+
+  text, ok := process(&template)
+  return text, nil
+}
+
+render_with_json :: proc(
+  input: string,
+  json_filename: string
+) -> (s: string, err: Render_Error) {
+  json_src, _ := os.read_entire_file_from_filename(json_filename)
+  defer delete(json_src)
+  json_data := json.parse(json_src) or_return
+  defer json.destroy_value(json_data)
+  json_root := json_data.(json.Object)
+
+  lexer := Lexer{
+    src=input,
+    delim=CORE_DEF
+  }
+  defer delete(lexer.tag_stack)
+  defer delete(lexer.tokens)
+
+  parse(&lexer) or_return
+
+  data := json_root["data"]
+  partials := json_root["partials"]
+  template := Template {
+    lexer=lexer,
+    data=data,
+    partials=partials
+  }
+  text, ok := process(&template)
+  defer delete(template.context_stack)
+
+  return text, nil
+}
+
+render_from_filename_with_json :: proc(
+  filename: string,
+  json_filename: string
+) -> (s: string, err: Render_Error) {
+  src, _ := os.read_entire_file_from_filename(filename)
+  defer delete(src)
+  str := string(src)
+
+  json_src, _ := os.read_entire_file_from_filename(json_filename)
+  defer delete(json_src)
+  json_data := json.parse(json_src) or_return
+  defer json.destroy_value(json_data)
+  json_root := json_data.(json.Object)
+
+  lexer := Lexer {
+    src=str,
+    delim=CORE_DEF
+  }
+  defer delete(lexer.tag_stack)
+  defer delete(lexer.tokens)
+  parse(&lexer) or_return
+
+  data := json_root["data"]
+  partials := json_root["partials"]
+  template := Template {
+    lexer=lexer,
+    data=data,
+    partials=partials
+  }
+  defer delete(template.context_stack)
+
+  text, ok := process(&template)
+  return text, nil
+}
+
+_main :: proc() -> (err: Render_Error) {
   defer free_all(context.temp_allocator)
 
-  input := "tmp/test.txt"
-  data := map[string][4]string {
-    "names" = [4]string{"Ben", "Jono", "Sarah", "Phil"}
-  }
-  defer delete(data)
+  input := "Hello.{{#names}} You were born on {{.}}.{{/names}}"
+  json := "tmp/test.json"
 
   fmt.printf("====== RENDERING\n")
   fmt.printf("Input : '%v'\n", input)
-  fmt.printf("Data : '%v'\n", data)
-  output := render_from_filename(input, data) or_return
+  output := render_with_json(input, json) or_return
   fmt.printf("Output: %v\n", output)
 
   return nil

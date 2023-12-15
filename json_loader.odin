@@ -4,17 +4,6 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:runtime"
 
-// 1. A map from string => JSON_Data
-// 2. A list of JSON_Data
-// 3. A value of some kind (string, int, etc.)
-JSON_Map :: distinct map[string]JSON_Data
-JSON_List :: distinct [dynamic]JSON_Data
-JSON_Data :: union {
-  JSON_Map,
-  JSON_List,
-  any
-}
-
 load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
   switch _val in val {
   case bool, string:

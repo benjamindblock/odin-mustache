@@ -3,76 +3,6 @@ package mustache
 import "core:fmt"
 import "core:strings"
 
-TokenDelimiter :: struct {
-  otag: string,
-  ctag: string,
-  otag_lit: string,
-  ctag_lit: string,
-  otag_section_open: string,
-  otag_section_close: string,
-  otag_literal: string,
-  otag_comment: string,
-  otag_inverted: string,
-  otag_partial: string,
-  otag_delim: string,
-  ctag_delim: string
-}
-
-CORE_DEF :: TokenDelimiter {
-  otag = "{{",
-  ctag = "}}",
-  otag_lit = "{{{",
-  ctag_lit = "}}}",
-  otag_section_open = "{{#",
-  otag_section_close = "{{/",
-  otag_literal = "{{&",
-  otag_comment = "{{!",
-  otag_inverted = "{{^",
-  otag_partial = "{{>",
-  otag_delim = "{{=",
-  ctag_delim = "=}}"
-}
-
-Token :: struct {
-  type: TokenType,
-  value: string,
-  pos: Pos,
-  iters: int,
-  start_i: int
-}
-
-TokenType :: enum {
-  Text,
-  Tag,
-  SectionOpenInverted,
-  TagLiteral,
-  TagLiteralTriple,
-  SectionOpen,
-  SectionClose,
-  Comment,
-  Partial,
-  Newline,
-  Skip,
-  EOF // The last token parsed, caller should not call again.
-}
-
-Pos :: struct {
-  start: int,
-  end: int,
-  line: int
-}
-
-Lexer :: struct {
-  src: string,
-  cursor: int,
-  line: int,
-  tokens: [dynamic]Token,
-  cur_token_type: TokenType,
-  cur_token_start_pos: int,
-  tag_stack: [dynamic]rune,
-  delim: TokenDelimiter
-}
-
 peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
   peek_i: int
   peeked: rune
@@ -94,30 +24,30 @@ peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
 
 /*
   Used AFTER a new Token is inserted into the tokens dynamic
-  array. In the case of a .TagLiteral ('{{{...}}}'), we need
+  array. In the case of a .Tag_Literal ('{{{...}}}'), we need
   to advance the next start position by three instead of two,
   to account for the additional brace.
 */
-lexer_start :: proc(l: ^Lexer, new_type: TokenType) {
+lexer_start :: proc(l: ^Lexer, new_type: Token_Type) {
   cur_type := l.cur_token_type
 
   switch {
   // Moving from text into a tag.
   case cur_type == .Text:
     switch new_type {
-    case .SectionOpen:
+    case .Section_Open:
       l.cur_token_start_pos = l.cursor + len(l.delim.otag_section_open)
-    case .SectionClose:
+    case .Section_Close:
       l.cur_token_start_pos = l.cursor + len(l.delim.otag_section_close)
-    case .SectionOpenInverted:
+    case .Section_Open_Inverted:
       l.cur_token_start_pos = l.cursor + len(l.delim.otag_inverted)
     case .Partial:
       l.cur_token_start_pos = l.cursor + len(l.delim.otag_partial)
     case .Comment:
       l.cur_token_start_pos = l.cursor + len(l.delim.otag_comment)
-    case .TagLiteral:
+    case .Tag_Literal:
       l.cur_token_start_pos = l.cursor + len(l.delim.otag_literal)
-    case .TagLiteralTriple:
+    case .Tag_Literal_Triple:
       l.cur_token_start_pos = l.cursor + len(l.delim.otag_lit)
     case .Tag:
       l.cur_token_start_pos = l.cursor + len(l.delim.otag)
@@ -128,9 +58,9 @@ lexer_start :: proc(l: ^Lexer, new_type: TokenType) {
     switch cur_type {
     case .Newline:
       l.cur_token_start_pos = l.cursor + len("\n")
-    case .Tag, .SectionOpenInverted, .TagLiteral, .SectionClose, .SectionOpen, .Comment, .Partial:
+    case .Tag, .Section_Open_Inverted, .Tag_Literal, .Section_Close, .Section_Open, .Comment, .Partial:
       l.cur_token_start_pos = l.cursor + len(l.delim.ctag)
-    case .TagLiteralTriple:
+    case .Tag_Literal_Triple:
       l.cur_token_start_pos = l.cursor + len(l.delim.ctag_lit)
     case .Text, .EOF, .Skip:
     }
@@ -149,13 +79,13 @@ lexer_append :: proc(l: ^Lexer) {
     append_text(l)
   case .Newline:
     append_newline(l)
-  case .Tag, .TagLiteral, .TagLiteralTriple, .Comment, .Partial, .SectionOpen, .SectionOpenInverted, .SectionClose:
+  case .Tag, .Tag_Literal, .Tag_Literal_Triple, .Comment, .Partial, .Section_Open, .Section_Open_Inverted, .Section_Close:
     append_tag(l, l.cur_token_type)
   case .EOF, .Skip:
   }
 }
 
-append_tag :: proc(l: ^Lexer, token_type: TokenType) {
+append_tag :: proc(l: ^Lexer, token_type: Token_Type) {
   pos := Pos{
     start=l.cur_token_start_pos,
     end=l.cursor,
@@ -197,7 +127,7 @@ append_newline :: proc(l: ^Lexer) {
   append(&l.tokens, newline)
 }
 
-parse :: proc(l: ^Lexer) -> (err: LexerError) {
+parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
   for l.cursor < len(l.src) {
     ch := rune(l.src[l.cursor])
     defer { l.cursor += 1 }
@@ -214,27 +144,27 @@ parse :: proc(l: ^Lexer) -> (err: LexerError) {
       l.line += 1
     case peek(l, l.delim.otag_lit):
       lexer_append(l)
-      lexer_start(l, .TagLiteralTriple)
+      lexer_start(l, .Tag_Literal_Triple)
     case peek(l, l.delim.otag_section_open):
       lexer_append(l)
-      lexer_start(l, .SectionOpen)
+      lexer_start(l, .Section_Open)
     case peek(l, l.delim.otag_section_close):
       lexer_append(l)
-      lexer_start(l, .SectionClose)
+      lexer_start(l, .Section_Close)
     case peek(l, l.delim.otag_inverted):
       lexer_append(l)
-      lexer_start(l, .SectionOpenInverted)
+      lexer_start(l, .Section_Open_Inverted)
     case peek(l, l.delim.otag_partial):
       lexer_append(l)
       lexer_start(l, .Partial)
     case peek(l, l.delim.otag_literal):
       lexer_append(l)
-      lexer_start(l, .TagLiteral)
+      lexer_start(l, .Tag_Literal)
     case peek(l, l.delim.otag_comment):
       lexer_append(l)
       lexer_start(l, .Comment)
     // Be careful with checking for "{{" -- it could be a substring of "{{{"
-    case peek(l, l.delim.otag) && l.cur_token_type != .TagLiteralTriple:
+    case peek(l, l.delim.otag) && l.cur_token_type != .Tag_Literal_Triple:
       lexer_append(l)
       lexer_start(l, .Tag)
     case peek(l, "}") && l.cur_token_type != .Text:
@@ -261,7 +191,7 @@ token_should_skip :: proc(l: Lexer, t: Token) -> (skip: bool) {
     skip = should_skip_newline(l, t)
   case .Text:
     skip = should_skip_text(l, t)
-  case .Tag, .TagLiteral, .TagLiteralTriple, .Partial, .SectionOpen, .SectionClose, .SectionOpenInverted:
+  case .Tag, .Tag_Literal, .Tag_Literal_Triple, .Partial, .Section_Open, .Section_Close, .Section_Open_Inverted:
     skip = false
   case .EOF, .Skip, .Comment:
     skip = true
@@ -315,9 +245,9 @@ should_skip_newline :: proc(l: Lexer, token: Token) -> (bool) {
       if !is_text_blank(t.value) {
         return false
       }
-    case .Tag, .TagLiteral, .TagLiteralTriple:
+    case .Tag, .Tag_Literal, .Tag_Literal_Triple:
       return false
-    case .SectionOpen, .SectionClose, .SectionOpenInverted, .Comment,
+    case .Section_Open, .Section_Close, .Section_Open_Inverted, .Comment,
          .Partial, .Newline, .Skip, .EOF:
     }
   }
@@ -338,9 +268,9 @@ should_skip_text :: proc(l: Lexer, token: Token) -> (bool) {
       if !is_text_blank(t.value) {
         return false
       }
-    case .Tag, .TagLiteral, .TagLiteralTriple, .Partial:
+    case .Tag, .Tag_Literal, .Tag_Literal_Triple, .Partial:
       return false
-    case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment:
+    case .Section_Open, .Section_Open_Inverted, .Section_Close, .Comment:
       standalone_tag_count += 1
     case .Newline, .Skip, .EOF:
     }
@@ -365,9 +295,9 @@ is_standalone_partial :: proc(l: Lexer, token: Token) -> (bool) {
       if !is_text_blank(t.value) {
         return false
       }
-    case .Tag, .TagLiteral, .TagLiteralTriple:
+    case .Tag, .Tag_Literal, .Tag_Literal_Triple:
       return false
-    case .SectionOpen, .SectionOpenInverted, .SectionClose, .Comment, .Partial:
+    case .Section_Open, .Section_Open_Inverted, .Section_Close, .Comment, .Partial:
       standalone_tag_count += 1
     case .Newline, .Skip, .EOF:
     }
