@@ -1,4 +1,4 @@
-.PHONY: build debug test run ex
+.PHONY: build debug test run
 
 build:
 	@mkdir -p bin
