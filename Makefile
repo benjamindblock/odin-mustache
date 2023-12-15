@@ -1,17 +1,17 @@
-.PHONY: build
+.PHONY: build debug test run ex
 
 build:
 	@mkdir -p bin
-	odin build . -show-timings -vet -vet-style -out:bin/odin-mustache -warnings-as-errors
+	odin build src -show-timings -out:bin/odin-mustache
 
 debug:
 	@mkdir -p bin
-	odin build . -show-timings -vet -vet-style -out:bin/odin-mustache -warnings-as-errors -debug
+	odin build src -show-timings -vet -vet-style -out:bin/odin-mustache -warnings-as-errors -debug
 
 test:
 	@mkdir -p bin
-	odin test . -show-timings -vet -vet-style -out:bin/odin-mustache -warnings-as-errors -debug
+	odin test src -show-timings -vet -vet-style -out:bin/odin-mustache -warnings-as-errors -debug
 
 run:
 	@mkdir -p bin
-	odin run . -show-timings -vet -vet-style -out:bin/odin-mustache -warnings-as-errors -debug
+	odin run src -show-timings -vet -vet-style -out:bin/odin-mustache -warnings-as-errors -debug
