@@ -86,3 +86,8 @@ output, _ = process(&template)
 
 ## Escaping
 `odin-mustache` follows the official mustache HTML escaping rules. That is, if you enclose a variable with two curly brackets, `{{var}}`, the contents are HTML-escaped. For instance, strings like `5 > 2` are converted to `5 &gt; 2`. To use raw characters, use three curly brackets `{{{var}}}`.
+
+## Future Work
+- Improve error handling and reporting
+- Configurable precision for floating point types
+- Add support for changing delimiters
