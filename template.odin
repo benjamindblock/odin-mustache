@@ -220,7 +220,7 @@ is_text_blank :: proc(s: string) -> (res: bool) {
 @(private) _falsey_context := map[string]bool{
   FALSEY = true,
   "null" = true,
-  "" = true
+  "" = true,
 }
 
 // Returns true if the value is one of the "falsey" values
@@ -228,7 +228,7 @@ is_text_blank :: proc(s: string) -> (res: bool) {
 @(private) _whitespace := map[rune]bool{
   ' ' = true,
   '\t' = true,
-  '\r' = true
+  '\r' = true,
 }
 
 // Sections can have false-y values in their corresponding data. When this
@@ -334,7 +334,7 @@ template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
   if t.type == .Section_Open_Inverted {
     stack_entry := ContextStackEntry{
       data=invert_data(data),
-      label=data_id
+      label=data_id,
     }
     inject_at(&tmpl.context_stack, 0, stack_entry)
   } else {
@@ -445,7 +445,7 @@ map_has_key :: proc(v: any, map_key: string) -> (has: bool) {
   }
 
   map_cap := uintptr(runtime.map_cap(m^))
-  ks, vs, hs, _, _ := runtime.map_kvh_data_dynamic(m^, map_info)
+  ks, _, hs, _, _ := runtime.map_kvh_data_dynamic(m^, map_info)
 
   for bucket_index in 0..<map_cap {
     runtime.map_hash_is_valid(hs[bucket_index]) or_continue
@@ -546,7 +546,7 @@ invert_data :: proc(data: any) -> any {
 template_find_section_close_tag_index :: proc(
   tmpl: ^Template,
   label: string,
-  offset: int
+  offset: int,
 ) -> (int) {
   for t, i in tmpl.lexer.tokens[offset:] {
     if t.type == .Section_Close && t.value == label {
@@ -604,7 +604,7 @@ any_to_string :: proc(obj: any) -> (s: string, err: Render_Error) {
 template_insert_partial :: proc(
   tmpl: ^Template,
   token: Token,
-  offset: int
+  offset: int,
 ) -> (err: Lexer_Error) {
   partial_name := token.value
   partial_content := dig(tmpl.partials, []string{partial_name})
@@ -613,7 +613,7 @@ template_insert_partial :: proc(
   lexer := Lexer{
     src=partial_str,
     line=token.pos.line,
-    delim=CORE_DEF
+    delim=CORE_DEF,
   }
   parse(&lexer) or_return
 

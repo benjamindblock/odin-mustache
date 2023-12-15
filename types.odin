@@ -1,7 +1,15 @@
 package mustache
 
+import "core:encoding/json"
+
+Render_Error :: union {
+  Lexer_Error,
+  Template_Error,
+  json.Error,
+}
+
 Lexer_Error :: union {
-  Unbalanced_Tags
+  Unbalanced_Tags,
 }
 
 Unbalanced_Tags :: struct {}
@@ -18,7 +26,7 @@ Token_Delimiters :: struct {
   otag_inverted: string,
   otag_partial: string,
   otag_delim: string,
-  ctag_delim: string
+  ctag_delim: string,
 }
 
 CORE_DEF :: Token_Delimiters {
@@ -33,7 +41,7 @@ CORE_DEF :: Token_Delimiters {
   otag_inverted = "{{^",
   otag_partial = "{{>",
   otag_delim = "{{=",
-  ctag_delim = "=}}"
+  ctag_delim = "=}}",
 }
 
 Token :: struct {
@@ -41,7 +49,7 @@ Token :: struct {
   value: string,
   pos: Pos,
   iters: int,
-  start_i: int
+  start_i: int,
 }
 
 Token_Type :: enum {
@@ -56,13 +64,13 @@ Token_Type :: enum {
   Partial,
   Newline,
   Skip,
-  EOF // The last token parsed, caller should not call again.
+  EOF, // The last token parsed, caller should not call again.
 }
 
 Pos :: struct {
   start: int,
   end: int,
-  line: int
+  line: int,
 }
 
 Lexer :: struct {
@@ -73,29 +81,29 @@ Lexer :: struct {
   cur_token_type: Token_Type,
   cur_token_start_pos: int,
   tag_stack: [dynamic]rune,
-  delim: Token_Delimiters
+  delim: Token_Delimiters,
 }
 
 Data_Error :: enum {
 	None,
 	Unsupported_Type,
-  Map_Key_Not_Found
+  Map_Key_Not_Found,
 }
 
 Template_Error :: union {
-	Data_Error
+	Data_Error,
 }
 
 Template :: struct {
   lexer: Lexer,
   data: any,
   partials: any,
-  context_stack: [dynamic]ContextStackEntry
+  context_stack: [dynamic]ContextStackEntry,
 }
 
 ContextStackEntry :: struct {
   data: any,
-  label: string
+  label: string,
 }
 
 Data_Type :: enum {
@@ -103,7 +111,7 @@ Data_Type :: enum {
   Struct,
   List,
   Value,
-  Null
+  Null,
 }
 
 // 1. A map from string => JSON_Data
@@ -114,5 +122,5 @@ JSON_List :: distinct [dynamic]JSON_Data
 JSON_Data :: union {
   JSON_Map,
   JSON_List,
-  any
+  any,
 }

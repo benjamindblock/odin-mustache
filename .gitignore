@@ -1,4 +1,4 @@
 */**/.DS_Store
 .DS_Store
 tmp/
-odin-mustache.dSYM/
+*/**/odin-mustache.dSYM/

@@ -2,10 +2,8 @@ package mustache
 
 import "core:encoding/json"
 import "core:fmt"
-import "core:mem"
 import "core:os"
 import "core:reflect"
-import "core:runtime"
 import "core:slice"
 import "core:testing"
 
@@ -18,7 +16,7 @@ SECTIONS_SPEC :: "spec/sections.json"
 
 Test_Struct :: struct {
   name: string,
-  email: string
+  email: string,
 }
 Test_Map :: map[string]string
 Test_List :: [dynamic]string
@@ -51,7 +49,7 @@ assert :: proc(
   t: ^testing.T,
   actual: bool,
   msg: string,
-  loc := #caller_location
+  loc := #caller_location,
 ) {
   testing.expect(t, actual, msg, loc)
 }
@@ -60,7 +58,7 @@ assert_not :: proc(
   t: ^testing.T,
   actual: bool,
   msg: string,
-  loc := #caller_location
+  loc := #caller_location,
 ) {
   testing.expect(t, !actual, msg, loc)
 }
@@ -80,7 +78,7 @@ test_basic :: proc(t: ^testing.T) {
   template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
   data := Test_Map {
     "x" = "Ben",
-    "y" = "R2D2"
+    "y" = "R2D2",
   }
   exp_output := "Hello, Ben, nice to meet you. My name is R2D2."
   assert_mustache(t, template, data, exp_output)
@@ -110,8 +108,8 @@ test_struct_inside_map :: proc(t: ^testing.T) {
   data: map[string]Test_Data = {
     "name" = "Ben",
     "email" = Test_Map {
-      "address" = "foo@example.com"
-    }
+      "address" = "foo@example.com",
+    },
   }
 
   exp_output := "Hello, Ben. Send an email to foo@example.com."
@@ -122,7 +120,7 @@ test_struct_inside_map :: proc(t: ^testing.T) {
 test_list :: proc(t: ^testing.T) {
   template := "{{#names}}{{.}}{{/names}}"
   data := map[string][dynamic]string {
-    "names" = [dynamic]string{"Helena", " Bloomington"}
+    "names" = [dynamic]string{"Helena", " Bloomington"},
   }
 
   exp_output := "Helena Bloomington"
@@ -155,10 +153,8 @@ test_interpolation_spec :: proc(t: ^testing.T) {
   root := spec.(json.Object)
   tests := root["tests"].(json.Array)
 
-  for test, i in tests {
+  for test in tests {
     test_obj := test.(json.Object)
-    test_name := test_obj["name"].(string)
-    test_desc := test_obj["desc"].(string)
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
@@ -176,10 +172,8 @@ test_comments_spec :: proc(t: ^testing.T) {
   root := spec.(json.Object)
   tests := root["tests"].(json.Array)
 
-  for test, i in tests {
+  for test in tests {
     test_obj := test.(json.Object)
-    test_name := test_obj["name"].(string)
-    test_desc := test_obj["desc"].(string)
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
@@ -197,10 +191,8 @@ test_sections_spec :: proc(t: ^testing.T) {
   root := spec.(json.Object)
   tests := root["tests"].(json.Array)
 
-  for test, i in tests {
+  for test in tests {
     test_obj := test.(json.Object)
-    test_name := test_obj["name"].(string)
-    test_desc := test_obj["desc"].(string)
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
@@ -218,10 +210,8 @@ test_inverted_spec :: proc(t: ^testing.T) {
   root := spec.(json.Object)
   tests := root["tests"].(json.Array)
 
-  for test, i in tests {
+  for test in tests {
     test_obj := test.(json.Object)
-    test_name := test_obj["name"].(string)
-    test_desc := test_obj["desc"].(string)
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
     data := test_obj["data"]
@@ -239,7 +229,7 @@ test_partials_spec :: proc(t: ^testing.T) {
   root := spec.(json.Object)
   tests := root["tests"].(json.Array)
 
-  for test, i in tests {
+  for test in tests {
     test_obj := test.(json.Object)
     template := test_obj["template"].(string)
     exp_output := test_obj["expected"].(string)
@@ -288,14 +278,14 @@ test_map_get :: proc(t: ^testing.T) {
   output: any
   output, _ = map_get(
     map[string]string{"name" = "George"},
-    "name"
+    "name",
   )
   testing.expect_value(t, output.(string), "George")
 
   // Get the value in a map with one key when key is cstring.
   output, _ = map_get(
     map[cstring]string{"name" = "George"},
-    "name"
+    "name",
   )
   testing.expect_value(t, output.(string), "George")
 
@@ -303,9 +293,9 @@ test_map_get :: proc(t: ^testing.T) {
   output, _ = map_get(
     map[string]string{
       "name" = "George",
-      "hometown" = "Helena"
+      "hometown" = "Helena",
     },
-    "name"
+    "name",
   )
   testing.expect_value(t, output.(string), "George")
 
@@ -313,16 +303,16 @@ test_map_get :: proc(t: ^testing.T) {
   output, _ = map_get(
     map[string]string{
       "name" = "George",
-      "hometown" = "Helena"
+      "hometown" = "Helena",
     },
-    "hometown"
+    "hometown",
   )
   testing.expect_value(t, output.(string), "Helena")
 
   // Get an int
   output, _ = map_get(
     map[string]int{"phone_number" = 5555555555},
-    "phone_number"
+    "phone_number",
   )
   testing.expect_value(t, output.(int), 5555555555)
 
@@ -330,7 +320,7 @@ test_map_get :: proc(t: ^testing.T) {
   data := Test_Map{"name" = "Lee"}
   output, _ = map_get(
     map[string]Test_Map{"person" = data},
-    "person"
+    "person",
   )
   testing.expect_value(t, output.(Test_Map)["name"], data["name"])
 
@@ -360,14 +350,14 @@ test_struct_get :: proc(t: ^testing.T) {
   testing.expect(
     t,
     reflect.is_nil(output),
-    "String argument that is NOT a Struct returns nil"
+    "String argument that is NOT a Struct returns nil",
   )
 
   output = struct_get(Test_Map{"name" = "Lee"}, "name")
   testing.expect(
     t,
     reflect.is_nil(output),
-    "Map argument that is NOT a Struct returns nil"
+    "Map argument that is NOT a Struct returns nil",
   )
 
   // Extract from a map type inside a union.
@@ -382,13 +372,13 @@ test_is_map :: proc(t: ^testing.T) {
   assert(
     t,
     is_map(map[string]string{"ben" = "jono"}),
-    "Regular map should return true"
+    "Regular map should return true",
   )
 
   assert(
     t,
     is_map(Test_Map{"name" = "Lee"}),
-    "Named map should return true"
+    "Named map should return true",
   )
 
   data: Test_Data
@@ -396,20 +386,20 @@ test_is_map :: proc(t: ^testing.T) {
   assert(
     t,
     is_map(data),
-    "Union with Map variant should be considered a Map"
+    "Union with Map variant should be considered a Map",
   )
 
   data = Test_List{ "foo", "bar", "baz" }
   assert_not(
     t,
     is_map(data),
-    "Union with list variant should not be considered a Map"
+    "Union with list variant should not be considered a Map",
   )
 
   assert_not(
     t,
     is_map(Test_Struct{"Ben", "foo@example.com"}),
-    "Struct should not be a map"
+    "Struct should not be a map",
   )
 
   u: Test_Data
@@ -417,7 +407,7 @@ test_is_map :: proc(t: ^testing.T) {
   assert_not(
     t,
     is_map(u),
-    "Struct variant of a Union should not be considered a Map"
+    "Struct variant of a Union should not be considered a Map",
   )
 }
 
@@ -442,7 +432,7 @@ test_is_list :: proc(t: ^testing.T) {
   assert_not(
     t,
     is_list(u_map),
-    "Map in union that has list type should not be considered a list"
+    "Map in union that has list type should not be considered a list",
   )
 }
 
@@ -451,7 +441,7 @@ test_is_struct :: proc(t: ^testing.T) {
   assert(
     t,
     is_struct(Test_Struct{"Ben", "foo@example.com"}),
-    "Struct should be considered a Struct"
+    "Struct should be considered a Struct",
   )
 
   u: Test_Data
@@ -459,7 +449,7 @@ test_is_struct :: proc(t: ^testing.T) {
   assert(
     t,
     is_struct(u),
-    "Struct variant of a union should be considered a Struct"
+    "Struct variant of a union should be considered a Struct",
   )
 
   data: Test_Data
@@ -467,14 +457,14 @@ test_is_struct :: proc(t: ^testing.T) {
   assert_not(
     t,
     is_struct(data),
-    "Union with map variant should not be considered a Struct"
+    "Union with map variant should not be considered a Struct",
   )
 
   data = Test_List{"foo", "bar", "baz"}
   assert_not(
     t,
     is_struct(data),
-    "Union with list variant should not be considered a Struct"
+    "Union with list variant should not be considered a Struct",
   )
 }
 
@@ -485,37 +475,37 @@ test_is_union :: proc(t: ^testing.T) {
   assert(
     t,
     is_union(data),
-    "Union is union"
+    "Union is union",
   )
 
   assert_not(
     t,
     is_union(Test_Map{"name" = "Ben"}),
-    "Union member with a type is not a union"
+    "Union member with a type is not a union",
   )
 
   assert_not(
     t,
     is_union(Test_List{"foo", "bar", "baz"}),
-    "Union member with a type is not a union"
+    "Union member with a type is not a union",
   )
 
   assert_not(
     t,
     is_union(map[string]string{"ben" = "jono"}),
-    "Map should not be a union"
+    "Map should not be a union",
   )
 
   assert_not(
     t,
     is_union(Test_Struct{"Ben", "foo@example.com"}),
-    "Struct should not be a union"
+    "Struct should not be a union",
   )
 
   assert_not(
     t,
     is_union(Test_Map{"name" = "Lee"}),
-    "Named map should not be a union"
+    "Named map should not be a union",
   )
 }
 
@@ -592,7 +582,7 @@ test_dig :: proc(t: ^testing.T) {
 
   // Pull out a map value
   data = map[string]string {
-    "name" = "Jono"
+    "name" = "Jono",
   }
   keys = {"name"}
   output = dig(data, keys[:])
@@ -602,8 +592,8 @@ test_dig :: proc(t: ^testing.T) {
   data = map[string]map[string]string {
     "customer1" = map[string]string {
       "name" = "Kurt",
-      "email" = "test@example.com"
-    }
+      "email" = "test@example.com",
+    },
   }
   keys = {"customer1", "email"}
   output = dig(data, keys[:])
@@ -612,10 +602,10 @@ test_dig :: proc(t: ^testing.T) {
   // Pull out a nested map
   nested := map[string]string {
     "name" = "Kurt",
-    "email" = "test@example.com"
+    "email" = "test@example.com",
   }
   data = map[string]map[string]string {
-    "customer1" = nested
+    "customer1" = nested,
   }
   keys = {"customer1"}
   output = dig(data, keys[:])
@@ -631,7 +621,7 @@ test_dig :: proc(t: ^testing.T) {
 
   // Pull out a struct inside a map
   data = map[string]Test_Struct {
-    "customer1" = Test_Struct{"Ben", "foo@example.com"}
+    "customer1" = Test_Struct{"Ben", "foo@example.com"},
   }
   keys = {"customer1", "email"}
   output = dig(data, keys[:])
@@ -663,7 +653,7 @@ test_dig :: proc(t: ^testing.T) {
 
   // Pull out a nil struct value
   data = map[string]string {
-    "name" = "Ben"
+    "name" = "Ben",
   }
   keys = {"XXX"}
   output = dig(data, keys[:])

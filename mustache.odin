@@ -5,20 +5,14 @@ import "core:fmt"
 import "core:mem"
 import "core:os"
 
-Render_Error :: union {
-  Lexer_Error,
-  Template_Error,
-  json.Error
-}
-
 render :: proc(
   input: string,
   data: any,
-  partials: any
+  partials: any,
 ) -> (s: string, err: Render_Error) {
   lexer := Lexer{
     src=input,
-    delim=CORE_DEF
+    delim=CORE_DEF,
   }
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
@@ -28,9 +22,9 @@ render :: proc(
   template := Template {
     lexer=lexer,
     data=data,
-    partials=partials
+    partials=partials,
   }
-  text, ok := process(&template)
+  text := process(&template) or_return
   defer delete(template.context_stack)
 
   return text, nil
@@ -38,7 +32,7 @@ render :: proc(
 
 render_from_filename :: proc(
   filename: string,
-  data: any
+  data: any,
 ) -> (s: string, err: Render_Error) {
   src, _ := os.read_entire_file_from_filename(filename)
   defer delete(src)
@@ -46,7 +40,7 @@ render_from_filename :: proc(
 
   lexer := Lexer {
     src=str,
-    delim=CORE_DEF
+    delim=CORE_DEF,
   }
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
@@ -56,17 +50,17 @@ render_from_filename :: proc(
   template := Template {
     lexer=lexer,
     data=data,
-    partials=partials
+    partials=partials,
   }
   defer delete(template.context_stack)
 
-  text, ok := process(&template)
+  text := process(&template) or_return
   return text, nil
 }
 
 render_with_json :: proc(
   input: string,
-  json_filename: string
+  json_filename: string,
 ) -> (s: string, err: Render_Error) {
   json_src, _ := os.read_entire_file_from_filename(json_filename)
   defer delete(json_src)
@@ -76,7 +70,7 @@ render_with_json :: proc(
 
   lexer := Lexer{
     src=input,
-    delim=CORE_DEF
+    delim=CORE_DEF,
   }
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
@@ -88,9 +82,9 @@ render_with_json :: proc(
   template := Template {
     lexer=lexer,
     data=data,
-    partials=partials
+    partials=partials,
   }
-  text, ok := process(&template)
+  text := process(&template) or_return
   defer delete(template.context_stack)
 
   return text, nil
@@ -98,7 +92,7 @@ render_with_json :: proc(
 
 render_from_filename_with_json :: proc(
   filename: string,
-  json_filename: string
+  json_filename: string,
 ) -> (s: string, err: Render_Error) {
   src, _ := os.read_entire_file_from_filename(filename)
   defer delete(src)
@@ -112,7 +106,7 @@ render_from_filename_with_json :: proc(
 
   lexer := Lexer {
     src=str,
-    delim=CORE_DEF
+    delim=CORE_DEF,
   }
   defer delete(lexer.tag_stack)
   defer delete(lexer.tokens)
@@ -123,11 +117,11 @@ render_from_filename_with_json :: proc(
   template := Template {
     lexer=lexer,
     data=data,
-    partials=partials
+    partials=partials,
   }
   defer delete(template.context_stack)
 
-  text, ok := process(&template)
+  text := process(&template) or_return
   return text, nil
 }
 

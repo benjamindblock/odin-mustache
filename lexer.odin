@@ -86,10 +86,10 @@ lexer_append :: proc(l: ^Lexer) {
 }
 
 append_tag :: proc(l: ^Lexer, token_type: Token_Type) {
-  pos := Pos{
+  pos := Pos {
     start=l.cur_token_start_pos,
     end=l.cursor,
-    line=l.line
+    line=l.line,
   }
 
   if pos.end > pos.start {
@@ -103,10 +103,10 @@ append_tag :: proc(l: ^Lexer, token_type: Token_Type) {
 }
 
 append_text :: proc(l: ^Lexer) {
-  pos := Pos{
+  pos := Pos {
     start=l.cur_token_start_pos,
     end=l.cursor,
-    line=l.line
+    line=l.line,
   }
 
   if pos.end > pos.start {
@@ -117,10 +117,10 @@ append_text :: proc(l: ^Lexer) {
 }
 
 append_newline :: proc(l: ^Lexer) {
-  pos := Pos{
+  pos := Pos {
     start=l.cur_token_start_pos,
     end=l.cursor + 1,
-    line=l.line
+    line=l.line,
   }
 
   newline := Token{type=.Newline, value="\n", pos=pos}
@@ -181,7 +181,7 @@ parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
 
 lexer_print_tokens :: proc(l: Lexer) {
   for t, i in l.tokens {
-    fmt.println("    ", t)
+    fmt.println(i, "    ", t)
   }
 }
 
