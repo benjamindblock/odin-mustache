@@ -1,5 +1,5 @@
 # odin-mustache
-Native implementation of mustache templates in [Odin](https://odin-lang.org).
+Native implementation of {{mustache}} templates in [Odin](https://odin-lang.org).
 
 https://github.com/benjamindblock/odin-mustache/assets/1155805/7d794861-e308-4132-aaa0-f800392208a4
 
@@ -95,3 +95,4 @@ output, _ = process(&template)
 - Improve error handling and reporting
 - Configurable precision for floating point types
 - Add support for changing delimiters
+- Loop conditionals (eg., checking for the first iteration or last iteration)
