@@ -20,12 +20,9 @@ Test_Struct :: struct {
   name: string,
   email: string
 }
-
 Test_Map :: map[string]string
-
 Test_List :: [dynamic]string
-
-Test_Union :: union {
+Test_Data :: union {
   Test_Struct,
   Test_Map,
   Test_List,
@@ -72,7 +69,7 @@ assert_mustache :: proc(t: ^testing.T,
                         input: string,
                         data: any,
                         exp_output: string,
-                        partials := Map{},
+                        partials: any = map[string]string{},
                         loc := #caller_location) {
   output, _ := render(input, data, partials)
   testing.expect_value(t, output, exp_output, loc)
@@ -81,7 +78,7 @@ assert_mustache :: proc(t: ^testing.T,
 @(test)
 test_basic :: proc(t: ^testing.T) {
   template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
-  data := Map {
+  data := Test_Map {
     "x" = "Ben",
     "y" = "R2D2"
   }
@@ -100,7 +97,7 @@ test_struct :: proc(t: ^testing.T) {
 @(test)
 test_struct_union :: proc(t: ^testing.T) {
   template := "Hello, {{name}}. Send an email to {{email}}."
-  data: Test_Union
+  data: Test_Data
   data = Test_Struct {"Ben", "foo@example.com"}
   exp_output := "Hello, Ben. Send an email to foo@example.com."
   assert_mustache(t, template, data, exp_output)
@@ -110,7 +107,7 @@ test_struct_union :: proc(t: ^testing.T) {
 test_struct_inside_map :: proc(t: ^testing.T) {
   template := "Hello, {{name}}. Send an email to {{#email}}{{address}}{{/email}}."
 
-  data: map[string]Test_Union = {
+  data: map[string]Test_Data = {
     "name" = "Ben",
     "email" = Test_Map {
       "address" = "foo@example.com"
@@ -143,7 +140,7 @@ test_no_interpolation :: proc(t: ^testing.T) {
 @(test)
 test_literal_tag :: proc(t: ^testing.T) {
   template := "Hello, {{{verb1}}}."
-  data := Map {
+  data := Test_Map {
     "verb1" = "I like < >",
   }
   exp_output := "Hello, I like < >."
@@ -249,7 +246,7 @@ test_partials_spec :: proc(t: ^testing.T) {
     data := test_obj["data"]
     input := load_json(data)
     partials := test_obj["partials"]
-    partials_input := load_json(partials).(Map)
+    partials_input := load_json(partials).(JSON_Map)
     assert_mustache(t, template, input, exp_output, partials_input)
   }
 }
@@ -338,7 +335,7 @@ test_map_get :: proc(t: ^testing.T) {
   testing.expect_value(t, output.(Test_Map)["name"], data["name"])
 
   // Extract from a map type inside a union.
-  u_map: Test_Union
+  u_map: Test_Data
   u_map = Test_Map{"name" = "St. Charles"}
   output, _ = map_get(u_map, "name")
   testing.expect_value(t, output.(string), u_map.(Test_Map)["name"])
@@ -374,7 +371,7 @@ test_struct_get :: proc(t: ^testing.T) {
   )
 
   // Extract from a map type inside a union.
-  u_struct: Test_Union
+  u_struct: Test_Data
   u_struct = Test_Struct{"St. Charles", "foo@example.com"}
   output = struct_get(u_struct, "name")
   testing.expect_value(t, output.(string), u_struct.(Test_Struct).name)
@@ -394,7 +391,7 @@ test_is_map :: proc(t: ^testing.T) {
     "Named map should return true"
   )
 
-  data: Test_Union
+  data: Test_Data
   data = Test_Map{ "name" = "Ben" }
   assert(
     t,
@@ -415,7 +412,7 @@ test_is_map :: proc(t: ^testing.T) {
     "Struct should not be a map"
   )
 
-  u: Test_Union
+  u: Test_Data
   u = Test_Struct{"ben", "foo@example.com"}
   assert_not(
     t,
@@ -433,14 +430,14 @@ test_is_list :: proc(t: ^testing.T) {
   dyn_arr := [dynamic]string{"element1"}
   assert(t, is_list(dyn_arr), "Dynamic array should be considered a list")
 
-  u_arr: Test_Union
+  u_arr: Test_Data
   u_arr = Test_List{"element1"}
   assert(t, is_list(u_arr), "Dynamic array in a union should be considered a list")
 
   assert_not(t, is_list("foo"), "string should not be considered a list")
   assert_not(t, is_list(1), "int should not be considered a list")
 
-  u_map: Test_Union
+  u_map: Test_Data
   u_map = Test_Map{"name" = "Sal"}
   assert_not(
     t,
@@ -457,7 +454,7 @@ test_is_struct :: proc(t: ^testing.T) {
     "Struct should be considered a Struct"
   )
 
-  u: Test_Union
+  u: Test_Data
   u = Test_Struct{"ben", "foo@example.com"}
   assert(
     t,
@@ -465,7 +462,7 @@ test_is_struct :: proc(t: ^testing.T) {
     "Struct variant of a union should be considered a Struct"
   )
 
-  data: Test_Union
+  data: Test_Data
   data = Test_Map{"name" = "Ben"}
   assert_not(
     t,
@@ -483,7 +480,7 @@ test_is_struct :: proc(t: ^testing.T) {
 
 @(test)
 test_is_union :: proc(t: ^testing.T) {
-  data: Test_Union
+  data: Test_Data
   data = Test_Map{ "name" = "Ben" }
   assert(
     t,
@@ -538,7 +535,7 @@ test_data_len :: proc(t: ^testing.T) {
   data = Test_Struct{"Ben", "foo@example.com"}
   testing.expect_value(t, data_len(data), 2)
 
-  u: Test_Union
+  u: Test_Data
   u = Test_Struct{"Ben", "foo@example.com"}
   testing.expect_value(t, data_len(u), 2)
 
@@ -557,7 +554,7 @@ test_has_key :: proc(t: ^testing.T) {
   assert(t, has_key(data, "A1"), "Should return true if map has key")
   assert_not(t, has_key(data, "B2"), "Should return false if map does not have key")
 
-  u: Test_Union
+  u: Test_Data
   u = Test_Map{"name" = "St. Charles"}
   assert(t, has_key(u, "name"), "Should return true if union-map has key")
   assert_not(t, has_key(u, "email"), "Should return false if union-map does not have key")

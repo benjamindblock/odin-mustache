@@ -1,7 +1,6 @@
 package mustache
 
 import "core:fmt"
-import "core:os"
 import "core:strings"
 
 TokenDelimiter :: struct {

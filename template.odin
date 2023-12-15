@@ -60,7 +60,7 @@ Data_Type :: enum {
   Struct,
   List,
   Value,
-  Nil
+  Null
 }
 
 escape_html_string :: proc(s: string, allocator := context.allocator) -> (string) {
@@ -96,7 +96,7 @@ dig :: proc(d: any, keys: []string) -> any {
       } else {
         return nil
       }
-    case .Nil:
+    case .Null:
       return nil
     }
   }
@@ -298,7 +298,7 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
   case .Value:
     s := fmt.tprintf("%v", stack_entry.data)
     return !_falsey_context[s]
-  case .Nil:
+  case .Null:
     return false
   }
 
@@ -385,7 +385,7 @@ template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
       inject_at(&tmpl.context_stack, 0, stack_entry)
     case .List:
       inject_list_data_into_context_stack(tmpl, data, offset)
-    case .Nil:
+    case .Null:
       stack_entry := ContextStackEntry{data=nil, label=data_id}
       inject_at(&tmpl.context_stack, 0, stack_entry)
     }
@@ -453,7 +453,7 @@ data_len :: proc(obj: any) -> (l: int) {
     l = len(reflect.struct_field_names(obj.id))
   case .Map, .List, .Value:
     l = reflect.length(obj)
-  case .Nil:
+  case .Null:
   }
 
   return l
@@ -531,7 +531,7 @@ has_key :: proc(obj: any, key: string) -> (has: bool) {
     }
     fields := reflect.struct_field_names(obj.id)
     return slice.contains(fields, key)
-  case .List, .Value, .Nil:
+  case .List, .Value, .Null:
     return false
   }
 
@@ -541,7 +541,7 @@ has_key :: proc(obj: any, key: string) -> (has: bool) {
 // Get the data type of an object.
 data_type :: proc(obj: any) -> Data_Type {
   if reflect.is_nil(obj) {
-    return .Nil
+    return .Null
   } else if is_struct(obj) {
     return .Struct
   } else if is_map(obj) {
@@ -571,7 +571,7 @@ invert_data :: proc(data: any) -> any {
     } else {
       s = FALSEY
     }
-  case .Nil:
+  case .Null:
     s = TRUE
   }
 
@@ -631,7 +631,7 @@ any_to_string :: proc(obj: any) -> (s: string, err: RenderError) {
     return s, TemplateError {}
   case .Value:
     s = fmt.aprintf("%v", obj)
-  case .Nil:
+  case .Null:
     s = ""
   }
 
@@ -692,7 +692,7 @@ template_insert_partial :: proc(
   return nil
 }
 
-template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) {
+process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) {
   b := strings.builder_make(context.temp_allocator)
 
   root := ContextStackEntry{data=tmpl.data, label="ROOT"}
@@ -740,7 +740,7 @@ template_process :: proc(tmpl: ^Template) -> (output: string, err: RenderError) 
 render :: proc(
   input: string,
   data: any,
-  partials := Map{}
+  partials: any
 ) -> (s: string, err: RenderError) {
   lexer := Lexer{src=input, delim=CORE_DEF}
   defer delete(lexer.tag_stack)
@@ -749,7 +749,7 @@ render :: proc(
   parse(&lexer) or_return
 
   template := Template{lexer=lexer, data=data, partials=partials}
-  text, ok := template_process(&template)
+  text, ok := process(&template)
   return text, nil
 }
 
@@ -766,10 +766,10 @@ render_from_filename :: proc(
   defer delete(lexer.tokens)
   parse(&lexer) or_return
 
-  partials := Map{}
+  partials: any
   template := Template{lexer=lexer, data=data, partials=partials}
   defer delete(template.context_stack)
 
-  text, ok := template_process(&template)
+  text, ok := process(&template)
   return text, nil
 }

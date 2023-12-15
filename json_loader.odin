@@ -2,36 +2,37 @@ package mustache
 
 import "core:encoding/json"
 import "core:fmt"
+import "core:runtime"
 
-// All data provided will either be:
-// 1. A string
-// 2. A mapping from string => string
-// 3. A mapping from string => more Data
-// 4. An array of Data?
-Map :: distinct map[string]Data
-List :: distinct [dynamic]Data
-Data :: union {
-  Map,
-  List,
-  string
+// 1. A map from string => JSON_Data
+// 2. A list of JSON_Data
+// 3. A value of some kind (string, int, etc.)
+JSON_Map :: distinct map[string]JSON_Data
+JSON_List :: distinct [dynamic]JSON_Data
+JSON_Data :: union {
+  JSON_Map,
+  JSON_List,
+  any
 }
 
-load_json :: proc(val: json.Value) -> (loaded: Data) {
+load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
   switch _val in val {
   case bool, string:
-    loaded = fmt.aprintf("%v", _val)
+    v: any = runtime.new_clone(fmt.tprintf("%v", _val))^
+    loaded = v
   case i64, f64:
-    decimal_str := fmt.aprintf("%v", _val)
-    loaded = trim_decimal_string(decimal_str)
+    str := fmt.tprintf("%v", _val)
+    decimal_str: any = runtime.new_clone(trim_decimal_string(str))^
+    loaded = decimal_str
   case json.Object:
-    data := Map{}
+    data := JSON_Map{}
     for key, val in _val {
-      new_k := fmt.aprintf("%v", key)
+      new_k := fmt.tprintf("%v", key)
       data[new_k] = load_json(val)
     }
     loaded = data
   case json.Array:
-    data := List{}
+    data := JSON_List{}
     for v in _val {
       append(&data, load_json(v))
     }
