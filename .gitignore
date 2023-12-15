@@ -2,3 +2,4 @@
 .DS_Store
 tmp/
 */**/odin-mustache.dSYM/
+bin/odin-mustache
