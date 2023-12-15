@@ -37,9 +37,11 @@ Renders a template stored in a text file using `data` and `partials` provided.
 
 Renders a template `string` using data and partials stored inside a JSON file. `odin-mustache` will handle loading the JSON into a usable format for Mustache to work with.
 
-**NOTE**: The JSON file must have at least a `data` key:
-    - `"data"`
-    - `"partials"` [optional]
+**NOTE**: The JSON file leverages the following top-level keys:
+```
+"data":      [required]
+"partials":  [optional]
+```
 
 #### 4. `render_from_filename_with_json(filename: string, json_filename: string)`
 
