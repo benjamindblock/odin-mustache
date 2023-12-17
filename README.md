@@ -93,6 +93,8 @@ output, _ = process(&template)
 
 ## Future Work
 - Improve error handling and reporting
+- Add optional logging for debugging and performance work
+- Support layouts (non-template text to render a template inside of) 
 - Configurable precision for floating point types
 - Add support for changing delimiters
 - Loop conditionals (eg., checking for the first iteration or last iteration)
