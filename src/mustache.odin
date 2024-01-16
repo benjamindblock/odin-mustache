@@ -10,19 +10,21 @@ render :: proc(
 	data: any,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
+	// Parse template.
 	lexer: Lexer
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
 	parse(&lexer) or_return
 
+	// Render template
 	template: Template
 	defer template_delete(&template)
 	template.lexer = lexer
 	template.data = data
 	template.partials = partials
-	s = template_render(&template) or_return
 
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -32,20 +34,22 @@ render_in_layout :: proc(
 	partials: any = map[string]string {},
 	layout: string,
 ) -> (s: string, err: Render_Error) {
+	// Parse template.
 	lexer: Lexer
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
 	parse(&lexer) or_return
 
+	// Render template.
 	template: Template
 	defer template_delete(&template)
 	template.lexer = lexer
 	template.data = data
 	template.partials = partials
 	template.layout = layout
-	s = template_render(&template) or_return
 
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -55,24 +59,26 @@ render_in_layout_file :: proc(
 	partials: any = map[string]string {},
 	layout_filename: string,
 ) -> (s: string, err: Render_Error) {
+	// Read layout file.
+	layout, _ := os.read_entire_file_from_filename(layout_filename)
+	defer delete(layout)
+
+	// Parse template.
 	lexer: Lexer
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
 	parse(&lexer) or_return
 
-	layout, _ := os.read_entire_file_from_filename(layout_filename)
-	defer delete(layout)
-	layout_str := string(layout)
-
+	// Render template
 	template: Template
 	defer template_delete(&template)
 	template.lexer = lexer
 	template.data = data
 	template.partials = partials
-	template.layout = layout_str
-	s = template_render(&template) or_return
+	template.layout = string(layout)
 
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -81,23 +87,25 @@ render_from_filename :: proc(
 	data: any,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
+	// Read template file.
 	src, _ := os.read_entire_file_from_filename(filename)
 	defer delete(src)
-	str := string(src)
 
+	// Parse template.
 	lexer: Lexer
 	defer lexer_delete(&lexer)
-	lexer.src = str
+	lexer.src = string(src)
 	lexer.delim = CORE_DEF
 	parse(&lexer) or_return
 
+	// Render template.
 	template: Template
 	defer template_delete(&template)
 	template.lexer = lexer
 	template.data = data
 	template.partials = partials
-	s = template_render(&template) or_return
 
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -107,7 +115,26 @@ render_from_filename_in_layout :: proc(
 	partials: any = map[string]string {},
 	layout: string,
 ) -> (s: string, err: Render_Error) {
+	// Read template file.
+	src, _ := os.read_entire_file_from_filename(filename)
+	defer delete(src)
 
+	// Parse template.
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = string(src)
+	lexer.delim = CORE_DEF
+	parse(&lexer) or_return
+
+	// Render template.
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = data
+	template.partials = partials
+	template.layout = layout
+
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -117,7 +144,30 @@ render_from_filename_in_layout_file :: proc(
 	partials: any = map[string]string {},
 	layout_filename: string,
 ) -> (s: string, err: Render_Error) {
+	// Read template file.
+	src, _ := os.read_entire_file_from_filename(filename)
+	defer delete(src)
 
+	// Read layout file.
+	layout, _ := os.read_entire_file_from_filename(layout_filename)
+	defer delete(layout)
+
+	// Parse template.
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = string(src)
+	lexer.delim = CORE_DEF
+	parse(&lexer) or_return
+
+	// Render template
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = data
+	template.partials = partials
+	template.layout = string(layout)
+
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -125,32 +175,29 @@ render_with_json :: proc(
 	template: string,
 	json_filename: string,
 ) -> (s: string, err: Render_Error) {
+	// Load JSON.
 	json_src, _ := os.read_entire_file_from_filename(json_filename)
 	defer delete(json_src)
 	json_data := json.parse(json_src) or_return
 	defer json.destroy_value(json_data)
 	json_root := json_data.(json.Object)
 
-	lexer := Lexer{
-		src=template,
-		delim=CORE_DEF,
-	}
-	defer delete(lexer.tag_stack)
-	defer delete(lexer.tokens)
-
+	// Parse template.
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = template
+	lexer.delim = CORE_DEF
 	parse(&lexer) or_return
 
-	data := json_root["data"]
-	partials := json_root["partials"]
-	template := Template {
-		lexer=lexer,
-		data=data,
-		partials=partials,
-	}
-	text := template_render(&template) or_return
-	defer delete(template.context_stack)
+	// Render template.
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = json_root["data"]
+	template.partials = json_root["partials"]
 
-	return text, nil
+	s = template_render(&template) or_return
+	return s, nil
 }
 
 render_with_json_in_layout :: proc(
@@ -158,7 +205,29 @@ render_with_json_in_layout :: proc(
 	json_filename: string,
 	layout: string,
 ) -> (s: string, err: Render_Error) {
+	// Load JSON.
+	json_src, _ := os.read_entire_file_from_filename(json_filename)
+	defer delete(json_src)
+	json_data := json.parse(json_src) or_return
+	defer json.destroy_value(json_data)
+	json_root := json_data.(json.Object)
 
+	// Parse template.
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = template
+	lexer.delim = CORE_DEF
+	parse(&lexer) or_return
+
+	// Render template.
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = json_root["data"]
+	template.partials = json_root["partials"]
+	template.layout = layout
+
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -167,7 +236,33 @@ render_with_json_in_layout_file :: proc(
 	json_filename: string,
 	layout_filename: string,
 ) -> (s: string, err: Render_Error) {
+	// Read layout file.
+	layout, _ := os.read_entire_file_from_filename(layout_filename)
+	defer delete(layout)
 
+	// Load JSON.
+	json_src, _ := os.read_entire_file_from_filename(json_filename)
+	defer delete(json_src)
+	json_data := json.parse(json_src) or_return
+	defer json.destroy_value(json_data)
+	json_root := json_data.(json.Object)
+
+	// Parse template.
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = template
+	lexer.delim = CORE_DEF
+	parse(&lexer) or_return
+
+	// Render template.
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = json_root["data"]
+	template.partials = json_root["partials"]
+	template.layout = string(layout)
+
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -175,35 +270,33 @@ render_from_filename_with_json :: proc(
 	filename: string,
 	json_filename: string,
 ) -> (s: string, err: Render_Error) {
+	// Read template file.
 	src, _ := os.read_entire_file_from_filename(filename)
 	defer delete(src)
-	str := string(src)
 
+	// Load JSON.
 	json_src, _ := os.read_entire_file_from_filename(json_filename)
 	defer delete(json_src)
 	json_data := json.parse(json_src) or_return
 	defer json.destroy_value(json_data)
 	json_root := json_data.(json.Object)
 
-	lexer := Lexer {
-		src=str,
-		delim=CORE_DEF,
-	}
-	defer delete(lexer.tag_stack)
-	defer delete(lexer.tokens)
+	// Parse template.
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = string(src)
+	lexer.delim = CORE_DEF
 	parse(&lexer) or_return
 
-	data := json_root["data"]
-	partials := json_root["partials"]
-	template := Template {
-		lexer=lexer,
-		data=data,
-		partials=partials,
-	}
-	defer delete(template.context_stack)
+	// Render template.
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = json_root["data"]
+	template.partials = json_root["partials"]
 
-	text := template_render(&template) or_return
-	return text, nil
+	s = template_render(&template) or_return
+	return s, nil
 }
 
 render_from_filename_with_json_in_layout :: proc(
@@ -211,7 +304,33 @@ render_from_filename_with_json_in_layout :: proc(
 	json_filename: string,
 	layout: string,
 ) -> (s: string, err: Render_Error) {
+	// Read template file.
+	src, _ := os.read_entire_file_from_filename(filename)
+	defer delete(src)
 
+	// Load JSON.
+	json_src, _ := os.read_entire_file_from_filename(json_filename)
+	defer delete(json_src)
+	json_data := json.parse(json_src) or_return
+	defer json.destroy_value(json_data)
+	json_root := json_data.(json.Object)
+
+	// Parse template.
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = string(src)
+	lexer.delim = CORE_DEF
+	parse(&lexer) or_return
+
+	// Render template.
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = json_root["data"]
+	template.partials = json_root["partials"]
+	template.layout = layout
+
+	s = template_render(&template) or_return
 	return s, nil
 }
 
@@ -220,7 +339,37 @@ render_from_filename_with_json_in_layout_file :: proc(
 	json_filename: string,
 	layout_filename: string,
 ) -> (s: string, err: Render_Error) {
+	// Read template file.
+	src, _ := os.read_entire_file_from_filename(filename)
+	defer delete(src)
 
+	// Read layout file.
+	layout, _ := os.read_entire_file_from_filename(layout_filename)
+	defer delete(layout)
+
+	// Load JSON.
+	json_src, _ := os.read_entire_file_from_filename(json_filename)
+	defer delete(json_src)
+	json_data := json.parse(json_src) or_return
+	defer json.destroy_value(json_data)
+	json_root := json_data.(json.Object)
+
+	// Parse template.
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = string(src)
+	lexer.delim = CORE_DEF
+	parse(&lexer) or_return
+
+	// Render template.
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = json_root["data"]
+	template.partials = json_root["partials"]
+	template.layout = string(layout)
+
+	s = template_render(&template) or_return
 	return s, nil
 }
 
