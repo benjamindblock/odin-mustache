@@ -235,12 +235,10 @@ is_text_blank :: proc(s: string) -> (res: bool) {
 
 // Sections can have false-y values in their corresponding data. When this
 // is the case, the section should not be rendered. Example:
-
 // input := "\"{{#boolean}}This should not be rendered.{{/boolean}}\""
 // data := Map {
 //   "boolean" = "false"
 // }
-
 // Valid contexts are:
 //   - Map with at least one key
 //   - List with at least one element
@@ -266,7 +264,7 @@ token_valid_in_template_context :: proc(tmpl: ^Template, token: Token) -> (bool)
 	return false
 }
 
-string_for_template_insertion :: proc(tmpl: ^Template, key: string) -> (s: string) {
+template_string_from_key :: proc(tmpl: ^Template, key: string) -> (s: string) {
 	resolved: any
 
 	if key == "." {
@@ -305,7 +303,7 @@ template_print_stack :: proc(tmpl: ^Template) {
 }
 
 // Retrieves data to place on the context stack.
-get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: any) {
+template_get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: any) {
 	ids := strings.split(data_id, ".")
 	defer delete(ids)
 
@@ -331,10 +329,10 @@ get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: any) {
 // when we encounter a .Section_Open tag.
 template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
 	data_id := t.value
-	data := get_data_for_stack(tmpl, data_id)
+	data := template_get_data_for_stack(tmpl, data_id)
 
 	if t.type == .Section_Open_Inverted {
-		stack_entry := ContextStackEntry{
+		stack_entry := Context_Stack_Entry{
 			data=invert_data(data),
 			label=data_id,
 		}
@@ -342,18 +340,18 @@ template_add_to_context_stack :: proc(tmpl: ^Template, t: Token, offset: int) {
 	} else {
 		switch data_type(data) {
 		case .Map, .Struct, .Value:
-			stack_entry := ContextStackEntry{data=data, label=data_id}
+			stack_entry := Context_Stack_Entry{data=data, label=data_id}
 			inject_at(&tmpl.context_stack, 0, stack_entry)
 		case .List:
-			inject_list_data_into_context_stack(tmpl, data, offset)
+			template_inject_list_into_context_stack(tmpl, data, offset)
 		case .Null:
-			stack_entry := ContextStackEntry{data=nil, label=data_id}
+			stack_entry := Context_Stack_Entry{data=nil, label=data_id}
 			inject_at(&tmpl.context_stack, 0, stack_entry)
 		}
 	}
 }
 
-inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: any, offset: int) {
+template_inject_list_into_context_stack :: proc(tmpl: ^Template, list: any, offset: int) {
 	section_open := tmpl.lexer.tokens[offset]
 	section_name := section_open.value
 	start_chunk := offset + 1
@@ -380,7 +378,7 @@ inject_list_data_into_context_stack :: proc(tmpl: ^Template, list: any, offset: 
 	// reverse order of the list, so that the first entry is at the top.
 	for i := section_close.iters; i >= 0; i -= 1 {
 		el := list_at(list, i)
-		stack_entry := ContextStackEntry{data=el, label="TEMP LIST"}
+		stack_entry := Context_Stack_Entry{data=el, label="TEMP LIST"}
 		inject_at(&tmpl.context_stack, 0, stack_entry)
 	}
 }
@@ -573,10 +571,10 @@ token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
 			s = t.value
 		}
 	case .Tag:
-		s = string_for_template_insertion(tmpl, t.value)
+		s = template_string_from_key(tmpl, t.value)
 		s = escape_html_string(s)
 	case .Tag_Literal, .Tag_Literal_Triple:
-		s = string_for_template_insertion(tmpl, t.value)
+		s = template_string_from_key(tmpl, t.value)
 	case .Newline:
 		s = "\n"
 	case .Section_Open, .Section_Open_Inverted, .Section_Close, .Comment, .Skip, .EOF, .Partial:
@@ -615,14 +613,14 @@ template_insert_partial :: proc(
 		line=token.pos.line,
 		delim=CORE_DEF,
 	}
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Performs any indentation on the .Partial that we are inserting.
 	//
 	// Example: use the first Token as the indentation for the .Partial Token.
 	// [Token{type=.Text, value="  "}, Token{type=.Partial, value="to_add"}]
 	//
-	standalone := is_standalone_partial(tmpl.lexer, token)
+	standalone := lexer_token_is_standalone_partial(tmpl.lexer, token)
 	if offset > 0 && standalone {
 		prev_token := tmpl.lexer.tokens[offset-1]
 		if prev_token.type == .Text && is_text_blank(prev_token.value) {
@@ -652,7 +650,7 @@ template_insert_partial :: proc(
 }
 
 template_eat_tokens :: proc(tmpl: ^Template, sb: ^strings.Builder) {
-	root: ContextStackEntry
+	root: Context_Stack_Entry
 	root.label = "ROOT"
 	root.data = tmpl.data
 	inject_at(&tmpl.context_stack, 0, root)
@@ -661,7 +659,7 @@ template_eat_tokens :: proc(tmpl: ^Template, sb: ^strings.Builder) {
 	// This is performed up-front due to partial templates -- we cannot check for the
 	// whitespace logic *after* the partials have been injected into the template.
 	for &t, i in tmpl.lexer.tokens {
-		if token_should_skip(tmpl.lexer, t) {
+		if lexer_token_should_skip(tmpl.lexer, t) {
 			t.type = .Skip
 		}
 	}
@@ -710,7 +708,7 @@ template_render :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) 
 		defer lexer_delete(&layout_lexer)
 		layout_lexer.src = tmpl.layout
 		layout_lexer.delim = CORE_DEF
-		parse(&layout_lexer) or_return
+		lexer_parse(&layout_lexer) or_return
 
 		// The Layout template will have no partials or layouts.
 		layout_template: Template

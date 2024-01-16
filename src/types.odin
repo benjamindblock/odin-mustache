@@ -98,11 +98,11 @@ Template :: struct {
 	lexer: Lexer,
 	data: any,
 	partials: any,
-	context_stack: [dynamic]ContextStackEntry,
+	context_stack: [dynamic]Context_Stack_Entry,
 	layout: string,
 }
 
-ContextStackEntry :: struct {
+Context_Stack_Entry :: struct {
 	data: any,
 	label: string,
 }

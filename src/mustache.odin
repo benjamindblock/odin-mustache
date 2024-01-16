@@ -15,7 +15,7 @@ render :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template
 	template: Template
@@ -39,7 +39,7 @@ render_in_layout :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template
@@ -68,7 +68,7 @@ render_in_layout_file :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template
 	template: Template
@@ -96,7 +96,7 @@ render_from_filename :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template
@@ -124,7 +124,7 @@ render_from_filename_in_layout :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template
@@ -157,7 +157,7 @@ render_from_filename_in_layout_file :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template
 	template: Template
@@ -187,7 +187,7 @@ render_with_json :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template
@@ -217,7 +217,7 @@ render_with_json_in_layout :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template
@@ -252,7 +252,7 @@ render_with_json_in_layout_file :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template
@@ -286,7 +286,7 @@ render_from_filename_with_json :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template
@@ -320,7 +320,7 @@ render_from_filename_with_json_in_layout :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template
@@ -359,7 +359,7 @@ render_from_filename_with_json_in_layout_file :: proc(
 	defer lexer_delete(&lexer)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	parse(&lexer) or_return
+	lexer_parse(&lexer) or_return
 
 	// Render template.
 	template: Template

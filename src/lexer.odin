@@ -8,7 +8,7 @@ lexer_delete :: proc(l: ^Lexer) {
 	delete(l.tokens)
 }
 
-peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
+lexer_peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
 	peek_i: int
 	peeked: rune
 
@@ -77,16 +77,16 @@ lexer_start :: proc(l: ^Lexer, new_type: Token_Type) {
 lexer_append :: proc(l: ^Lexer) {
 	switch l.cur_token_type {
 	case .Text:
-		append_text(l)
+		lexer_append_text(l)
 	case .Newline:
-		append_newline(l)
+		lexer_append_newline(l)
 	case .Tag, .Tag_Literal, .Tag_Literal_Triple, .Comment, .Partial, .Section_Open, .Section_Open_Inverted, .Section_Close:
-		append_tag(l, l.cur_token_type)
+		lexer_append_tag(l, l.cur_token_type)
 	case .EOF, .Skip:
 	}
 }
 
-append_tag :: proc(l: ^Lexer, token_type: Token_Type) {
+lexer_append_tag :: proc(l: ^Lexer, token_type: Token_Type) {
 	pos := Pos {
 		start=l.cur_token_start_pos,
 		end=l.cursor,
@@ -103,7 +103,7 @@ append_tag :: proc(l: ^Lexer, token_type: Token_Type) {
 	}
 }
 
-append_text :: proc(l: ^Lexer) {
+lexer_append_text :: proc(l: ^Lexer) {
 	pos := Pos {
 		start=l.cur_token_start_pos,
 		end=l.cursor,
@@ -117,7 +117,7 @@ append_text :: proc(l: ^Lexer) {
 	}
 }
 
-append_newline :: proc(l: ^Lexer) {
+lexer_append_newline :: proc(l: ^Lexer) {
 	pos := Pos {
 		start=l.cur_token_start_pos,
 		end=l.cursor + 1,
@@ -128,7 +128,7 @@ append_newline :: proc(l: ^Lexer) {
 	append(&l.tokens, newline)
 }
 
-parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
+lexer_parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
 	for l.cursor < len(l.src) {
 		ch := rune(l.src[l.cursor])
 		defer { l.cursor += 1 }
@@ -143,32 +143,32 @@ parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
 			lexer_append(l)
 			lexer_start(l, .Text)
 			l.line += 1
-		case peek(l, l.delim.otag_lit):
+		case lexer_peek(l, l.delim.otag_lit):
 			lexer_append(l)
 			lexer_start(l, .Tag_Literal_Triple)
-		case peek(l, l.delim.otag_section_open):
+		case lexer_peek(l, l.delim.otag_section_open):
 			lexer_append(l)
 			lexer_start(l, .Section_Open)
-		case peek(l, l.delim.otag_section_close):
+		case lexer_peek(l, l.delim.otag_section_close):
 			lexer_append(l)
 			lexer_start(l, .Section_Close)
-		case peek(l, l.delim.otag_inverted):
+		case lexer_peek(l, l.delim.otag_inverted):
 			lexer_append(l)
 			lexer_start(l, .Section_Open_Inverted)
-		case peek(l, l.delim.otag_partial):
+		case lexer_peek(l, l.delim.otag_partial):
 			lexer_append(l)
 			lexer_start(l, .Partial)
-		case peek(l, l.delim.otag_literal):
+		case lexer_peek(l, l.delim.otag_literal):
 			lexer_append(l)
 			lexer_start(l, .Tag_Literal)
-		case peek(l, l.delim.otag_comment):
+		case lexer_peek(l, l.delim.otag_comment):
 			lexer_append(l)
 			lexer_start(l, .Comment)
 		// Be careful with checking for "{{" -- it could be a substring of "{{{"
-		case peek(l, l.delim.otag) && l.cur_token_type != .Tag_Literal_Triple:
+		case lexer_peek(l, l.delim.otag) && l.cur_token_type != .Tag_Literal_Triple:
 			lexer_append(l)
 			lexer_start(l, .Tag)
-		case peek(l, "}") && l.cur_token_type != .Text:
+		case lexer_peek(l, "}") && l.cur_token_type != .Text:
 			lexer_append(l)
 			lexer_start(l, .Text)
 		}
@@ -186,12 +186,12 @@ lexer_print_tokens :: proc(l: Lexer) {
 	}
 }
 
-token_should_skip :: proc(l: Lexer, t: Token) -> (skip: bool) {
+lexer_token_should_skip :: proc(l: Lexer, t: Token) -> (skip: bool) {
 	switch t.type {
 	case .Newline:
-		skip = should_skip_newline(l, t)
+		skip = lexer_should_skip_newline_token(l, t)
 	case .Text:
-		skip = should_skip_text(l, t)
+		skip = lexer_should_skip_text_token(l, t)
 	case .Tag, .Tag_Literal, .Tag_Literal_Triple, .Partial, .Section_Open, .Section_Close, .Section_Open_Inverted:
 		skip = false
 	case .EOF, .Skip, .Comment:
@@ -202,7 +202,7 @@ token_should_skip :: proc(l: Lexer, t: Token) -> (skip: bool) {
 }
 
 // Retrieves all the tokens that are on a given line of the input text.
-tokens_on_same_line :: proc(l: Lexer, line: int) -> (tokens: []Token) {
+lexer_tokens_on_same_line :: proc(l: Lexer, line: int) -> (tokens: []Token) {
 	on_line := false
 	start_i: int
 	end_i: int
@@ -232,8 +232,8 @@ tokens_on_same_line :: proc(l: Lexer, line: int) -> (tokens: []Token) {
 
 // Skip a newline if we are on a line that has either a
 // non-blank .Text token OR any valid tags.
-should_skip_newline :: proc(l: Lexer, token: Token) -> (bool) {
-	on_line := tokens_on_same_line(l, token.pos.line)
+lexer_should_skip_newline_token :: proc(l: Lexer, token: Token) -> bool {
+	on_line := lexer_tokens_on_same_line(l, token.pos.line)
 
 	// If the newline is the only token present, do not skip it.
 	if len(on_line) == 1 {
@@ -259,8 +259,8 @@ should_skip_newline :: proc(l: Lexer, token: Token) -> (bool) {
 // If we are rendering a .Text tag, we should NOT render it if it is:
 //  - On a line with one .Section tag, AND
 //  - comprised of only whitespace, along with all the other .Text tokens
-should_skip_text :: proc(l: Lexer, token: Token) -> (bool) {
-	on_line := tokens_on_same_line(l, token.pos.line)
+lexer_should_skip_text_token :: proc(l: Lexer, token: Token) -> bool {
+	on_line := lexer_tokens_on_same_line(l, token.pos.line)
 
 	standalone_tag_count := 0
 	for t in on_line {
@@ -284,8 +284,8 @@ should_skip_text :: proc(l: Lexer, token: Token) -> (bool) {
 }
 
 // Checks if a given .Partial Token is "standalone."
-is_standalone_partial :: proc(l: Lexer, token: Token) -> (bool) {
-	on_line := tokens_on_same_line(l, token.pos.line)
+lexer_token_is_standalone_partial :: proc(l: Lexer, token: Token) -> bool {
+	on_line := lexer_tokens_on_same_line(l, token.pos.line)
 
 	standalone_tag_count := 0
 	for t in on_line {
