@@ -936,10 +936,23 @@ token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
 		s = template_string_from_key(tmpl, t.value)
 	case .Newline:
 		s = "\n"
-	case .Section_Open, .Section_Open_Inverted, .Section_Close, .Comment, .Skip, .EOF, .Partial:
+	case .Section_Open, .Section_Open_Inverted, .Section_Close,
+		 .Comment, .Skip, .EOF, .Partial:
 	}
 
 	return s
+}
+
+token_is_tag :: proc(t: Token) -> bool {
+	switch t.type {
+	case .Tag, .Tag_Literal, .Tag_Literal_Triple:
+		return true
+	case .Text, .Newline, .Section_Open, .Section_Open_Inverted, .Section_Close,
+		 .Comment, .Skip, .EOF, .Partial:
+		return false
+	}
+
+	return false
 }
 
 // When a .Partial token is encountered, we need to inject the contents
@@ -967,6 +980,48 @@ template_insert_partial :: proc(
 	//
 	standalone := lexer_token_is_standalone_partial(tmpl.lexer, token)
 	if offset > 0 && standalone {
+		prev_token := tmpl.lexer.tokens[offset-1]
+		if prev_token.type == .Text && is_text_blank(prev_token.value) {
+			cur_line := lexer.tokens[len(lexer.tokens)-1].pos.line
+			#reverse for t, i in lexer.tokens {
+				// Do not indent the top line.
+				if cur_line == 0 {
+					break
+				}
+
+				// When moving back up a line, insert the indentation.
+				if cur_line != t.pos.line {
+					inject_at(&lexer.tokens, i+1, prev_token)
+				}
+
+				cur_line = t.pos.line
+			}
+		}
+	}
+
+	// Inject tokens from the partial into the primary template.
+	#reverse for t in lexer.tokens {
+		inject_at(&tmpl.lexer.tokens, offset+1, t)
+	}
+
+	return nil
+}
+
+// Inject a chunk of text into the token list of the larger layout template.
+template_insert_content_into_layout :: proc(
+	tmpl: ^Template,
+	token: Token,
+	offset: int,
+	content: string,
+) -> (err: Lexer_Error) {
+	lexer: Lexer
+	lexer.src = content
+	lexer.line = token.pos.line
+	lexer.delim = CORE_DEF
+	lexer_parse(&lexer) or_return
+
+	// Performs indentation on the content.
+	if offset > 0 {
 		prev_token := tmpl.lexer.tokens[offset-1]
 		if prev_token.type == .Text && is_text_blank(prev_token.value) {
 			cur_line := lexer.tokens[len(lexer.tokens)-1].pos.line
@@ -1024,6 +1079,8 @@ template_eat_tokens :: proc(tmpl: ^Template, sb: ^strings.Builder) {
 			template_add_to_context_stack(tmpl, t, i)
 		case .Section_Close:
 			template_pop_from_context_stack(tmpl)
+			// If we are in a loop and have iterations remaining, jump back to
+			// the token at the start of the loop.
 			if t.iters > 0 {
 				t.iters -= 1
 				tmpl.lexer.tokens[i] = t
@@ -1050,7 +1107,6 @@ template_render :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) 
 
 		// Parse the layout
 		layout_lexer: Lexer
-		defer lexer_delete(&layout_lexer)
 		layout_lexer.src = tmpl.layout
 		layout_lexer.delim = CORE_DEF
 		lexer_parse(&layout_lexer) or_return
@@ -1059,8 +1115,12 @@ template_render :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) 
 		layout_template: Template
 		defer template_delete(&layout_template)
 		layout_template.lexer = layout_lexer
-		layout_template.data = map[string]string {
-			"content" = rendered,
+		layout_template.data = map[string]string {}
+
+		for t, i in layout_lexer.tokens {
+			if token_is_tag(t) && t.value == "content" {
+				template_insert_content_into_layout(&layout_template, t, i, rendered)
+			}
 		}
 
 		template_eat_tokens(&layout_template, &sbl)
@@ -1342,8 +1402,11 @@ render_from_filename_in_layout :: proc(
 	layout: string,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
-	// Read template file.
+	// Read template file and trim the trailing newline.
 	src, _ := os.read_entire_file_from_filename(filename)
+	if rune(src[len(src)-1]) == '\n' {
+		src = src[0:len(src)-1]
+	}
 	defer delete(src)
 
 	// Parse template.
@@ -1371,8 +1434,11 @@ render_from_filename_in_layout_file :: proc(
 	layout_filename: string,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
-	// Read template file.
+	// Read template file and trim the trailing newline.
 	src, _ := os.read_entire_file_from_filename(filename)
+	if rune(src[len(src)-1]) == '\n' {
+		src = src[0:len(src)-1]
+	}
 	defer delete(src)
 
 	// Read layout file.
@@ -1531,8 +1597,11 @@ render_from_filename_with_json_in_layout :: proc(
 	json_filename: string,
 	layout: string,
 ) -> (s: string, err: Render_Error) {
-	// Read template file.
+	// Read template file and trim the trailing newline.
 	src, _ := os.read_entire_file_from_filename(filename)
+	if rune(src[len(src)-1]) == '\n' {
+		src = src[0:len(src)-1]
+	}
 	defer delete(src)
 
 	// Load JSON.
@@ -1566,8 +1635,11 @@ render_from_filename_with_json_in_layout_file :: proc(
 	json_filename: string,
 	layout_filename: string,
 ) -> (s: string, err: Render_Error) {
-	// Read template file.
+	// Read template file and trim the trailing newline.
 	src, _ := os.read_entire_file_from_filename(filename)
+	if rune(src[len(src)-1]) == '\n' {
+		src = src[0:len(src)-1]
+	}
 	defer delete(src)
 
 	// Read layout file.

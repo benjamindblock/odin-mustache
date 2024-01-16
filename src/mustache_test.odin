@@ -129,7 +129,7 @@ test_render_from_filename_in_layout :: proc(t: ^testing.T) {
 	data := Test_Map{"name" = "Vincent"}
 	layout := "\nAbove.\n{{content}}\nBelow."
 
-	exp_output := "\nAbove.\nHello, this is Vincent.\n\nBelow."
+	exp_output := "\nAbove.\nHello, this is Vincent.\nBelow."
 	output, _ := render_from_filename_in_layout(template, data, layout)
 	testing.expect_value(t, output, exp_output)
 }
@@ -140,7 +140,7 @@ test_render_from_filename_in_layout_file :: proc(t: ^testing.T) {
 	data := Test_Map{"name" = "Vincent"}
 	layout := "spec/examples/layout.txt"
 
-	exp_output := "Begin layout >>\nHello, this is Vincent.\n\n<< End layout\n"
+	exp_output := "Begin layout >>\nHello, this is Vincent.\n<< End layout\n"
 	output, _ := render_from_filename_in_layout_file(template, data, layout)
 	testing.expect_value(t, output, exp_output)
 }
@@ -183,7 +183,7 @@ test_render_from_filename_with_json_in_layout :: proc(t: ^testing.T) {
 	json := "spec/examples/data.json"
 	layout := "\nAbove.\n{{content}}\nBelow."
 
-	exp_output := "\nAbove.\nHello, this is Kilgarvan.\n\nBelow."
+	exp_output := "\nAbove.\nHello, this is Kilgarvan.\nBelow."
 	output, _ := render_from_filename_with_json_in_layout(template, json, layout)
 	testing.expect_value(t, output, exp_output)
 }
@@ -194,7 +194,7 @@ test_render_from_filename_with_json_in_layout_file :: proc(t: ^testing.T) {
 	json := "spec/examples/data.json"
 	layout := "spec/examples/layout.txt"
 
-	exp_output := "Begin layout >>\nHello, this is Kilgarvan.\n\n<< End layout\n"
+	exp_output := "Begin layout >>\nHello, this is Kilgarvan.\n<< End layout\n"
 	output, _ := render_from_filename_with_json_in_layout_file(template, json, layout)
 	testing.expect_value(t, output, exp_output)
 }
