@@ -22,7 +22,6 @@ Usage:
 
 Examples:
   $ odin-mustache template.txt data.json
-  $ odin-mustache template.txt data.json -layout:layout.txt
 ```
 
 ### Odin Usage
@@ -77,7 +76,16 @@ Layouts can render content in both `{{normal}}` and `{{{literal}}}` tags.
 </html>
 ```
 
-### Usage
+### CLI Usage
+```
+Usage:
+  odin-mustache [path to template] [path to JSON] [OPTIONAL - layout]
+
+Examples:
+  $ odin-mustache template.html data.json layout.html
+```
+
+### Odin Usage
 To render a layout in Odin, all four of the above render procedures have `in_layout` and `in_layout_file` variations. These methods will insert the rendered content of a template within the given layout. This is convenient for rendering HTML views inside a larger layout, amongst other use-cases.
 
 The full list of corresponding methods is:
@@ -90,7 +98,7 @@ The full list of corresponding methods is:
 - `render_from_filename_with_json_in_layout(filename: string, json_filename: string, layout: string)`
 - `render_from_filename_with_json_in_layout_file(filename: string, json_filename: string, layout_filename: string)`
 
-### Example
+#### Example
 ```odin
 template := "Hello, {{name}}."
 data := map[string]string{"name" = "Kilgarvan"}
@@ -136,9 +144,9 @@ output, _ = process(&template)
 ```
 
 ## Future Work
+- Better CLI argument parsing
 - Improve error handling and reporting
 - Add optional logging for debugging and performance work
-- Support layouts (non-template text to render a template inside of) 
 - Configurable precision for floating point types
 - Add support for changing delimiters
 - Loop conditionals (eg., checking for the first iteration or last iteration)

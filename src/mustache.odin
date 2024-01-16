@@ -8,7 +8,6 @@ import "core:reflect"
 import "core:runtime"
 import "core:slice"
 import "core:strings"
-import "core:text/match"
 
 TRUE :: "true"
 FALSEY :: "false"
@@ -1712,20 +1711,6 @@ _main :: proc(
 	return output, nil
 }
 
-parse_layout_arg :: proc(arg: string) -> (filename: string) {
-	p := "^-layout:(.*)$"
-	m := match.matcher_init(arg, p)
-	match.matcher_gmatch(&m)
-	captures := match.matcher_captures_slice(&m)
-	if len(captures) != 1 {
-		return filename
-	}
-
-	c := captures[0]
-	filename = strings.cut(arg, c.byte_start, c.byte_end - c.byte_start)
-	return filename
-}
-
 main :: proc() {
 	defer free_all(context.temp_allocator)
 
@@ -1740,10 +1725,10 @@ main :: proc() {
 		error("You need to pass at least paths to the template and JSON data.")
 	}
 
-	// Parse out the filename in "-layout:filename"
+	// If a third argument was provided, this is the layout file.
 	layout_file: string
 	if len(os.args) == 4 {
-		layout_file = parse_layout_arg(os.args[3])
+		layout_file = os.args[3]
 	}
 
 	if output, err := _main(os.args[1], os.args[2], layout_file); err != nil {
