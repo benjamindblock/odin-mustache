@@ -63,12 +63,14 @@ assert_not :: proc(
 	testing.expect(t, !actual, msg, loc)
 }
 
-assert_mustache :: proc(t: ^testing.T,
-												input: string,
-												data: any,
-												exp_output: string,
-												partials: any = map[string]string{},
-												loc := #caller_location) {
+assert_mustache :: proc(
+	t: ^testing.T,
+	input: string,
+	data: any,
+	exp_output: string,
+	partials: any = map[string]string{},
+	loc := #caller_location,
+) {
 	output, _ := render(input, data, partials)
 	testing.expect_value(t, output, exp_output, loc)
 }
@@ -82,6 +84,21 @@ test_basic :: proc(t: ^testing.T) {
 	}
 	exp_output := "Hello, Vincent, nice to meet you. My name is R2D2."
 	assert_mustache(t, template, data, exp_output)
+}
+
+@(test)
+test_layout :: proc(t: ^testing.T) {
+	template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
+	data := Test_Map {
+		"x" = "Vincent",
+		"y" = "R2D2",
+	}
+	partials: any = map[string]string{}
+	layout := "\nAbove.\n{{content}}\nBelow."
+
+	exp_output := "\nAbove.\nHello, Vincent, nice to meet you. My name is R2D2.\nBelow."
+	output, _ := render_in_layout(template, data, partials, layout)
+	testing.expect_value(t, output, exp_output)
 }
 
 @(test)

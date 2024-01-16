@@ -17,6 +17,10 @@ HTML_AMPERSAND :: "&amp;"
 TRUE :: "true"
 FALSEY :: "false"
 
+template_delete :: proc(t: ^Template) {
+	delete(t.context_stack)
+}
+
 escape_html_string :: proc(s: string, allocator := context.allocator) -> (string) {
 	context.allocator = allocator
 
@@ -647,10 +651,10 @@ template_insert_partial :: proc(
 	return nil
 }
 
-process :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) {
-	b := strings.builder_make(context.temp_allocator)
-
-	root := ContextStackEntry{data=tmpl.data, label="ROOT"}
+template_eat_tokens :: proc(tmpl: ^Template, sb: ^strings.Builder) {
+	root: ContextStackEntry
+	root.label = "ROOT"
+	root.data = tmpl.data
 	inject_at(&tmpl.context_stack, 0, root)
 
 	// First pass to find all the whitespace/newline elements that should be skipped.
@@ -671,7 +675,7 @@ process :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) {
 		switch t.type {
 		case .Newline, .Text, .Tag, .Tag_Literal, .Tag_Literal_Triple:
 			if token_valid_in_template_context(tmpl, t) {
-				strings.write_string(&b, token_content(tmpl, t))
+				strings.write_string(sb, token_content(tmpl, t))
 			}
 		case .Section_Open, .Section_Open_Inverted:
 			template_add_to_context_stack(tmpl, t, i)
@@ -688,6 +692,37 @@ process :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) {
 		case .Comment, .Skip, .EOF:
 		}
 	}
+}
 
-	return strings.to_string(b), nil
+template_render :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) {
+	sb := strings.builder_make(context.temp_allocator)
+	defer strings.builder_destroy(&sb)
+
+	template_eat_tokens(tmpl, &sb)
+	rendered := strings.to_string(sb) 
+
+	if tmpl.layout != "" {
+		sbl := strings.builder_make(context.temp_allocator)
+		defer strings.builder_destroy(&sbl)
+
+		// Parse the layout
+		layout_lexer: Lexer
+		defer lexer_delete(&layout_lexer)
+		layout_lexer.src = tmpl.layout
+		layout_lexer.delim = CORE_DEF
+		parse(&layout_lexer) or_return
+
+		// The Layout template will have no partials or layouts.
+		layout_template: Template
+		defer template_delete(&layout_template)
+		layout_template.lexer = layout_lexer
+		layout_template.data = map[string]string {
+			"content" = rendered,
+		}
+
+		template_eat_tokens(&layout_template, &sbl)
+		rendered = strings.to_string(sbl)
+	}
+
+	return rendered, nil
 }

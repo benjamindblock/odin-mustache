@@ -10,24 +10,70 @@ render :: proc(
 	data: any,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
-	lexer := Lexer{
-		src=template,
-		delim=CORE_DEF,
-	}
-	defer delete(lexer.tag_stack)
-	defer delete(lexer.tokens)
-
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = template
+	lexer.delim = CORE_DEF
 	parse(&lexer) or_return
 
-	template := Template {
-		lexer=lexer,
-		data=data,
-		partials=partials,
-	}
-	text := process(&template) or_return
-	defer delete(template.context_stack)
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = data
+	template.partials = partials
+	s = template_render(&template) or_return
 
-	return text, nil
+	return s, nil
+}
+
+render_in_layout :: proc(
+	template: string,
+	data: any,
+	partials: any = map[string]string {},
+	layout: string,
+) -> (s: string, err: Render_Error) {
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = template
+	lexer.delim = CORE_DEF
+	parse(&lexer) or_return
+
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = data
+	template.partials = partials
+	template.layout = layout
+	s = template_render(&template) or_return
+
+	return s, nil
+}
+
+render_in_layout_file :: proc(
+	template: string,
+	data: any,
+	partials: any = map[string]string {},
+	layout_filename: string,
+) -> (s: string, err: Render_Error) {
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = template
+	lexer.delim = CORE_DEF
+	parse(&lexer) or_return
+
+	layout, _ := os.read_entire_file_from_filename(layout_filename)
+	defer delete(layout)
+	layout_str := string(layout)
+
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = data
+	template.partials = partials
+	template.layout = layout_str
+	s = template_render(&template) or_return
+
+	return s, nil
 }
 
 render_from_filename :: proc(
@@ -39,23 +85,40 @@ render_from_filename :: proc(
 	defer delete(src)
 	str := string(src)
 
-	lexer := Lexer {
-		src=str,
-		delim=CORE_DEF,
-	}
-	defer delete(lexer.tag_stack)
-	defer delete(lexer.tokens)
+	lexer: Lexer
+	defer lexer_delete(&lexer)
+	lexer.src = str
+	lexer.delim = CORE_DEF
 	parse(&lexer) or_return
 
-	template := Template {
-		lexer=lexer,
-		data=data,
-		partials=partials,
-	}
-	defer delete(template.context_stack)
+	template: Template
+	defer template_delete(&template)
+	template.lexer = lexer
+	template.data = data
+	template.partials = partials
+	s = template_render(&template) or_return
 
-	text := process(&template) or_return
-	return text, nil
+	return s, nil
+}
+
+render_from_filename_in_layout :: proc(
+	filename: string,
+	data: any,
+	partials: any = map[string]string {},
+	layout: string,
+) -> (s: string, err: Render_Error) {
+
+	return s, nil
+}
+
+render_from_filename_in_layout_file :: proc(
+	filename: string,
+	data: any,
+	partials: any = map[string]string {},
+	layout_filename: string,
+) -> (s: string, err: Render_Error) {
+
+	return s, nil
 }
 
 render_with_json :: proc(
@@ -84,10 +147,28 @@ render_with_json :: proc(
 		data=data,
 		partials=partials,
 	}
-	text := process(&template) or_return
+	text := template_render(&template) or_return
 	defer delete(template.context_stack)
 
 	return text, nil
+}
+
+render_with_json_in_layout :: proc(
+	template: string,
+	json_filename: string,
+	layout: string,
+) -> (s: string, err: Render_Error) {
+
+	return s, nil
+}
+
+render_with_json_in_layout_file :: proc(
+	template: string,
+	json_filename: string,
+	layout_filename: string,
+) -> (s: string, err: Render_Error) {
+
+	return s, nil
 }
 
 render_from_filename_with_json :: proc(
@@ -121,8 +202,26 @@ render_from_filename_with_json :: proc(
 	}
 	defer delete(template.context_stack)
 
-	text := process(&template) or_return
+	text := template_render(&template) or_return
 	return text, nil
+}
+
+render_from_filename_with_json_in_layout :: proc(
+	filename: string,
+	json_filename: string,
+	layout: string,
+) -> (s: string, err: Render_Error) {
+
+	return s, nil
+}
+
+render_from_filename_with_json_in_layout_file :: proc(
+	filename: string,
+	json_filename: string,
+	layout_filename: string,
+) -> (s: string, err: Render_Error) {
+
+	return s, nil
 }
 
 error :: proc(msg: string, args: ..any) -> ! {

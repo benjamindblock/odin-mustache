@@ -99,6 +99,7 @@ Template :: struct {
 	data: any,
 	partials: any,
 	context_stack: [dynamic]ContextStackEntry,
+	layout: string,
 }
 
 ContextStackEntry :: struct {

@@ -3,6 +3,11 @@ package mustache
 import "core:fmt"
 import "core:strings"
 
+lexer_delete :: proc(l: ^Lexer) {
+	delete(l.tag_stack)
+	delete(l.tokens)
+}
+
 peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
 	peek_i: int
 	peeked: rune
