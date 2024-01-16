@@ -130,23 +130,24 @@ data: map[string]string
 partials: map[string]string
 
 lexer := Lexer{src=src, delim=CORE_DEF}
-parse(&lexer)
+lexer_parse(&lexer)
 
 data = {"name" = "St. Charles"}
 template = Template{lexer=lexer, data=data, partials=partials}
-output, _ = process(&template)
+output, _ = template_render(&template)
 // => Hello, St. Charles!
 
 data = {"name" = "Edouard"}
 template = Template{lexer=lexer, data=data, partials=partials}
-output, _ = process(&template)
+output, _ = template_render(&template)
 // => Hello, Edouard!
 ```
 
 ## Future Work
+- Validate JSON keys
 - Better CLI argument parsing
 - Improve error handling and reporting
 - Add optional logging for debugging and performance work
 - Configurable precision for floating point types
 - Add support for changing delimiters
-- Loop conditionals (eg., checking for the first iteration or last iteration)
+- Special loop conditionals (eg., checking for the first iteration or last iteration)
