@@ -1625,15 +1625,15 @@ _main :: proc(
 	}
 
 	if layout_filename != "" {
-		output = render_from_filename_with_json(
-			template_filename,
-			json_filename,
-		) or_return
-	} else {
 		output = render_from_filename_with_json_in_layout_file(
 			template_filename,
 			json_filename,
 			layout_filename,
+		) or_return
+	} else {
+		output = render_from_filename_with_json(
+			template_filename,
+			json_filename,
 		) or_return
 	}
 
@@ -1671,7 +1671,6 @@ main :: proc() {
 	// Parse out the filename in "-layout:filename"
 	layout_file: string
 	if len(os.args) == 4 {
-		fmt.println(os.args)
 		layout_file = parse_layout_arg(os.args[3])
 	}
 
