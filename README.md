@@ -18,10 +18,11 @@ View some [example mustache files](https://github.com/mustache/mustache/tree/mas
 ### CLI Usage
 ```
 Usage:
-  odin-mustache [path to template] [path to JSON]
+  odin-mustache [path to template] [path to JSON] [OPTIONAL - layout]
 
-Example:
+Examples:
   $ odin-mustache template.txt data.json
+  $ odin-mustache template.txt data.json -layout:layout.txt
 ```
 
 ### Odin Usage
@@ -49,7 +50,7 @@ Renders a template `string` using data and partials stored inside a JSON file. `
 
 Renders a template stored in a text file using data and partials stored inside a JSON file. `odin-mustache` will handle loading the JSON into a usable format for Mustache to work with.
 
-### Example
+#### Example
 ```odin
 input := "Hello, {{name}}!"
 data: map[string]string = {
@@ -59,14 +60,60 @@ output, err := render(input, data)
 // => "Hello, St. Charles!"
 ```
 
-### Precompiled Templates
+## Escaping
+`odin-mustache` follows the official mustache HTML escaping rules. That is, if you enclose a variable with two curly brackets, `{{var}}`, the contents are HTML-escaped. For instance, strings like `5 > 2` are converted to `5 &gt; 2`. To use raw characters, use three curly brackets `{{{var}}}`.
+
+## Layouts
+`odin-mustache` supports rendering templates with layouts.
+
+A layout is a regular template with one restriction: **layout files can only have a single `{{content}}` tag.**
+
+Layouts can render content in both `{{normal}}` and `{{{literal}}}` tags.
+
+```
+<html>
+  <h1>My Website</h1>
+  <body>{{{content}}}</body>
+</html>
+```
+
+### Usage
+To render a layout in Odin, all four of the above render procedures have `in_layout` and `in_layout_file` variations. These methods will insert the rendered content of a template within the given layout. This is convenient for rendering HTML views inside a larger layout, amongst other use-cases.
+
+The full list of corresponding methods is:
+- `render_in_layout(template: string, data: any, layout: string, partials: any)`
+- `render_in_layout_file(template: string, data: any, layout_filename: string, partials: any)`
+- `render_from_filename_in_layout(filename: string, data: any, layout: string, partials: any)`
+- `render_from_filename_in_layout_file(filename: string, data: any, layout_filename: string, partials: any)`
+- `render_with_json_in_layout(template: string, json_filename: string, layout: string)`
+- `render_with_json_in_layout_file(template: string, json_filename: string, layout_filename: string)`
+- `render_from_filename_with_json_in_layout(filename: string, json_filename: string, layout: string)`
+- `render_from_filename_with_json_in_layout_file(filename: string, json_filename: string, layout_filename: string)`
+
+### Example
+```odin
+template := "Hello, {{name}}."
+data := map[string]string{"name" = "Kilgarvan"}
+layout := `Above >>
+{{content}}
+<< Below`
+
+output, _ := render_in_layout(template, data, layout)
+fmt.println(output)
+
+// Above >>
+// Hello, Kilgarvan.
+// << Below
+```
+
+## Precompiled Templates
 `odin-mustache` works in two steps:
 1. Lexing and parsing
 2. Rendering with data
 
 If you are rendering the same template multiple times (ex: sending out personalized emails to subscribers), the lexing+parsing step can be performed once to create a compiled template. This compiled template can then be used multiple times with different data.
 
-#### Example
+### Example
 ```odin
 src := "Hello, {{name}}!"
 template: Template
@@ -87,9 +134,6 @@ template = Template{lexer=lexer, data=data, partials=partials}
 output, _ = process(&template)
 // => Hello, Edouard!
 ```
-
-## Escaping
-`odin-mustache` follows the official mustache HTML escaping rules. That is, if you enclose a variable with two curly brackets, `{{var}}`, the contents are HTML-escaped. For instance, strings like `5 > 2` are converted to `5 &gt; 2`. To use raw characters, use three curly brackets `{{{var}}}`.
 
 ## Future Work
 - Improve error handling and reporting

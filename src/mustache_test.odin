@@ -63,25 +63,140 @@ assert_not :: proc(
 	testing.expect(t, !actual, msg, loc)
 }
 
-assert_mustache :: proc(t: ^testing.T,
-												input: string,
-												data: any,
-												exp_output: string,
-												partials: any = map[string]string{},
-												loc := #caller_location) {
+assert_mustache :: proc(
+	t: ^testing.T,
+	input: string,
+	data: any,
+	exp_output: string,
+	partials: any = map[string]string{},
+	loc := #caller_location,
+) {
 	output, _ := render(input, data, partials)
 	testing.expect_value(t, output, exp_output, loc)
 }
 
 @(test)
-test_basic :: proc(t: ^testing.T) {
+test_render :: proc(t: ^testing.T) {
 	template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
 	data := Test_Map {
 		"x" = "Vincent",
 		"y" = "R2D2",
 	}
+
 	exp_output := "Hello, Vincent, nice to meet you. My name is R2D2."
-	assert_mustache(t, template, data, exp_output)
+	output, _ := render(template, data)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_in_layout :: proc(t: ^testing.T) {
+	template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
+	data := Test_Map {
+		"x" = "Vincent",
+		"y" = "R2D2",
+	}
+	layout := "\nAbove.\n{{content}}\nBelow."
+
+	exp_output := "\nAbove.\nHello, Vincent, nice to meet you. My name is R2D2.\nBelow."
+	output, _ := render_in_layout(template, data, layout)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_in_layout_file :: proc(t: ^testing.T) {
+	template := "Hello, {{name}}."
+	data := Test_Map{"name" = "Vincent"}
+	layout := "spec/examples/layout.txt"
+
+	exp_output := "Begin layout >>\nHello, Vincent.\n<< End layout\n"
+	output, _ := render_in_layout_file(template, data, layout)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_from_filename :: proc(t: ^testing.T) {
+	template := "spec/examples/template.txt"
+	data := Test_Map{"name" = "Vincent"}
+
+	exp_output := "Hello, this is Vincent.\n"
+	output, _ := render_from_filename(template, data)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_from_filename_in_layout :: proc(t: ^testing.T) {
+	template := "spec/examples/template.txt"
+	data := Test_Map{"name" = "Vincent"}
+	layout := "\nAbove.\n{{content}}\nBelow."
+
+	exp_output := "\nAbove.\nHello, this is Vincent.\n\nBelow."
+	output, _ := render_from_filename_in_layout(template, data, layout)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_from_filename_in_layout_file :: proc(t: ^testing.T) {
+	template := "spec/examples/template.txt"
+	data := Test_Map{"name" = "Vincent"}
+	layout := "spec/examples/layout.txt"
+
+	exp_output := "Begin layout >>\nHello, this is Vincent.\n\n<< End layout\n"
+	output, _ := render_from_filename_in_layout_file(template, data, layout)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_with_json :: proc(t: ^testing.T) {
+	template := "Hello, {{name}}."
+	json := "spec/examples/data.json"
+
+	exp_output := "Hello, Kilgarvan."
+	output, _ := render_with_json(template, json)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_with_json_in_layout :: proc(t: ^testing.T) {
+	template := "Hello, {{name}}."
+	json := "spec/examples/data.json"
+	layout := "\nAbove.\n{{content}}\nBelow."
+
+	exp_output := "\nAbove.\nHello, Kilgarvan.\nBelow."
+	output, _ := render_with_json_in_layout(template, json, layout)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_with_json_in_layout_file :: proc(t: ^testing.T) {
+	template := "Hello, {{name}}."
+	json := "spec/examples/data.json"
+	layout := "spec/examples/layout.txt"
+
+	exp_output := "Begin layout >>\nHello, Kilgarvan.\n<< End layout\n"
+	output, _ := render_with_json_in_layout_file(template, json, layout)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_from_filename_with_json_in_layout :: proc(t: ^testing.T) {
+	template := "spec/examples/template.txt"
+	json := "spec/examples/data.json"
+	layout := "\nAbove.\n{{content}}\nBelow."
+
+	exp_output := "\nAbove.\nHello, this is Kilgarvan.\n\nBelow."
+	output, _ := render_from_filename_with_json_in_layout(template, json, layout)
+	testing.expect_value(t, output, exp_output)
+}
+
+@(test)
+test_render_from_filename_with_json_in_layout_file :: proc(t: ^testing.T) {
+	template := "spec/examples/template.txt"
+	json := "spec/examples/data.json"
+	layout := "spec/examples/layout.txt"
+
+	exp_output := "Begin layout >>\nHello, this is Kilgarvan.\n\n<< End layout\n"
+	output, _ := render_from_filename_with_json_in_layout_file(template, json, layout)
+	testing.expect_value(t, output, exp_output)
 }
 
 @(test)
