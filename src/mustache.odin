@@ -8,6 +8,7 @@ import "core:reflect"
 import "core:runtime"
 import "core:slice"
 import "core:strings"
+import "core:text/match"
 
 TRUE :: "true"
 FALSEY :: "false"
@@ -22,7 +23,12 @@ HTML_AMPERSAND :: "&amp;"
 Render_Error :: union {
 	Lexer_Error,
 	Template_Error,
+	File_Not_Found_Error,
 	json.Error,
+}
+
+File_Not_Found_Error :: struct {
+	filename: string,
 }
 
 Lexer_Error :: union {
@@ -1604,8 +1610,48 @@ error :: proc(msg: string, args: ..any) -> ! {
 _main :: proc(
 	template_filename: string,
 	json_filename: string,
+	layout_filename: string = "",
 ) -> (output: string, err: Render_Error) {
-	return render_from_filename_with_json(template_filename, json_filename)
+	if !os.is_file(template_filename) {
+		return "", File_Not_Found_Error{filename=template_filename}
+	}
+
+	if !os.is_file(json_filename) {
+		return "", File_Not_Found_Error{filename=json_filename}
+	}
+
+	if layout_filename != "" && !os.is_file(layout_filename) {
+		return "", File_Not_Found_Error{filename=layout_filename}
+	}
+
+	if layout_filename != "" {
+		output = render_from_filename_with_json(
+			template_filename,
+			json_filename,
+		) or_return
+	} else {
+		output = render_from_filename_with_json_in_layout_file(
+			template_filename,
+			json_filename,
+			layout_filename,
+		) or_return
+	}
+
+	return output, nil
+}
+
+parse_layout_arg :: proc(arg: string) -> (filename: string) {
+	p := "^-layout:(.*)$"
+	m := match.matcher_init(arg, p)
+	match.matcher_gmatch(&m)
+	captures := match.matcher_captures_slice(&m)
+	if len(captures) != 1 {
+		return filename
+	}
+
+	c := captures[0]
+	filename = strings.cut(arg, c.byte_start, c.byte_end - c.byte_start)
+	return filename
 }
 
 main :: proc() {
@@ -1618,11 +1664,18 @@ main :: proc() {
 		context.allocator = mem.tracking_allocator(&track)
 	}
 
-	if len(os.args) != 3 {
-		error("You need to pass paths to the template and JSON data.")
+	if len(os.args) < 3 {
+		error("You need to pass at least paths to the template and JSON data.")
 	}
 
-	if output, err := _main(os.args[1], os.args[2]); err != nil {
+	// Parse out the filename in "-layout:filename"
+	layout_file: string
+	if len(os.args) == 4 {
+		fmt.println(os.args)
+		layout_file = parse_layout_arg(os.args[3])
+	}
+
+	if output, err := _main(os.args[1], os.args[2], layout_file); err != nil {
 		fmt.printf("Err: %v\n", err)
 		os.exit(1)
 	} else {

@@ -18,10 +18,11 @@ View some [example mustache files](https://github.com/mustache/mustache/tree/mas
 ### CLI Usage
 ```
 Usage:
-  odin-mustache [path to template] [path to JSON]
+  odin-mustache [path to template] [path to JSON] [OPTIONAL - layout]
 
-Example:
+Examples:
   $ odin-mustache template.txt data.json
+  $ odin-mustache template.txt data.json -layout:layout.txt
 ```
 
 ### Odin Usage
@@ -48,6 +49,35 @@ Renders a template `string` using data and partials stored inside a JSON file. `
 #### 4. `render_from_filename_with_json(filename: string, json_filename: string)`
 
 Renders a template stored in a text file using data and partials stored inside a JSON file. `odin-mustache` will handle loading the JSON into a usable format for Mustache to work with.
+
+### Layouts
+All four of the above render procedures have corresponding `in_layout` and `in_layout_file` variations. This will render the content of the template within a given layout. This is convenient for rendering HTML views inside a larger layout, amongst other use-cases.
+
+The full list of corresponding methods is:
+- `render_in_layout(template: string, data: any, layout: string, partials: any)`
+- `render_in_layout_file(template: string, data: any, layout_filename: string, partials: any)`
+- `render_from_filename_in_layout(filename: string, data: any, layout: string, partials: any)`
+- `render_from_filename_in_layout_file(filename: string, data: any, layout_filename: string, partials: any)`
+- `render_with_json_in_layout(template: string, json_filename: string, layout: string)`
+- `render_with_json_in_layout_file(template: string, json_filename: string, layout_filename: string)`
+- `render_from_filename_with_json_in_layout(filename: string, json_filename: string, layout: string)`
+- `render_from_filename_with_json_in_layout_file(filename: string, json_filename: string, layout_filename: string)`
+
+#### Example
+```odin
+template := "Hello, {{name}}."
+data := map[string]string{"name" = "Kilgarvan"}
+layout := `Above >>
+{{content}}
+<< Below`
+
+output, _ := render_in_layout(template, data, layout)
+fmt.println(output)
+
+// Above >>
+// Hello, Kilgarvan.
+// << Below
+```
 
 ### Example
 ```odin
