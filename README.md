@@ -13,6 +13,10 @@ For more information about mustache, see the [mustache project page](https://mus
 
 View some [example mustache files](https://github.com/mustache/mustache/tree/master/examples) to get an overview.
 
+## Spec
+
+The [mustache-spec](https://github.com/mustache/spec) repo is added as a git submodule for testing purposes. To run tests, ensure that you run `git clone --recursive` and/or `git submodule update` as needed.
+
 ## Usage
 
 ### CLI Usage

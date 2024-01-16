@@ -7,12 +7,12 @@ import "core:reflect"
 import "core:slice"
 import "core:testing"
 
-COMMENTS_SPEC :: "spec/comments.json"
-DELIMITERS_SPEC :: "spec/delimiters.json"
-INTERPOLATION_SPEC :: "spec/interpolation.json"
-INVERTED_SPEC :: "spec/inverted.json"
-PARTIALS_SPEC :: "spec/partials.json"
-SECTIONS_SPEC :: "spec/sections.json"
+COMMENTS_SPEC :: "spec/specs/comments.json"
+DELIMITERS_SPEC :: "spec/specs/delimiters.json"
+INTERPOLATION_SPEC :: "spec/specs/interpolation.json"
+INVERTED_SPEC :: "spec/specs/inverted.json"
+PARTIALS_SPEC :: "spec/specs/partials.json"
+SECTIONS_SPEC :: "spec/specs/sections.json"
 
 Test_Struct :: struct {
 	name: string,
@@ -106,7 +106,7 @@ test_render_in_layout :: proc(t: ^testing.T) {
 test_render_in_layout_file :: proc(t: ^testing.T) {
 	template := "Hello, {{name}}."
 	data := Test_Map{"name" = "Vincent"}
-	layout := "spec/examples/layout.txt"
+	layout := "test/layout.txt"
 
 	exp_output := "Begin layout >>\nHello, Vincent.\n<< End layout\n"
 	output, _ := render_in_layout_file(template, data, layout)
@@ -115,7 +115,7 @@ test_render_in_layout_file :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename :: proc(t: ^testing.T) {
-	template := "spec/examples/template.txt"
+	template := "test/template.txt"
 	data := Test_Map{"name" = "Vincent"}
 
 	exp_output := "Hello, this is Vincent.\n"
@@ -125,7 +125,7 @@ test_render_from_filename :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename_in_layout :: proc(t: ^testing.T) {
-	template := "spec/examples/template.txt"
+	template := "test/template.txt"
 	data := Test_Map{"name" = "Vincent"}
 	layout := "\nAbove.\n{{content}}\nBelow."
 
@@ -136,9 +136,9 @@ test_render_from_filename_in_layout :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename_in_layout_file :: proc(t: ^testing.T) {
-	template := "spec/examples/template.txt"
+	template := "test/template.txt"
 	data := Test_Map{"name" = "Vincent"}
-	layout := "spec/examples/layout.txt"
+	layout := "test/layout.txt"
 
 	exp_output := "Begin layout >>\nHello, this is Vincent.\n<< End layout\n"
 	output, _ := render_from_filename_in_layout_file(template, data, layout)
@@ -148,7 +148,7 @@ test_render_from_filename_in_layout_file :: proc(t: ^testing.T) {
 @(test)
 test_render_with_json :: proc(t: ^testing.T) {
 	template := "Hello, {{name}}."
-	json := "spec/examples/data.json"
+	json := "test/data.json"
 
 	exp_output := "Hello, Kilgarvan."
 	output, _ := render_with_json(template, json)
@@ -158,7 +158,7 @@ test_render_with_json :: proc(t: ^testing.T) {
 @(test)
 test_render_with_json_in_layout :: proc(t: ^testing.T) {
 	template := "Hello, {{name}}."
-	json := "spec/examples/data.json"
+	json := "test/data.json"
 	layout := "\nAbove.\n{{content}}\nBelow."
 
 	exp_output := "\nAbove.\nHello, Kilgarvan.\nBelow."
@@ -169,8 +169,8 @@ test_render_with_json_in_layout :: proc(t: ^testing.T) {
 @(test)
 test_render_with_json_in_layout_file :: proc(t: ^testing.T) {
 	template := "Hello, {{name}}."
-	json := "spec/examples/data.json"
-	layout := "spec/examples/layout.txt"
+	json := "test/data.json"
+	layout := "test/layout.txt"
 
 	exp_output := "Begin layout >>\nHello, Kilgarvan.\n<< End layout\n"
 	output, _ := render_with_json_in_layout_file(template, json, layout)
@@ -179,8 +179,8 @@ test_render_with_json_in_layout_file :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename_with_json_in_layout :: proc(t: ^testing.T) {
-	template := "spec/examples/template.txt"
-	json := "spec/examples/data.json"
+	template := "test/template.txt"
+	json := "test/data.json"
 	layout := "\nAbove.\n{{content}}\nBelow."
 
 	exp_output := "\nAbove.\nHello, this is Kilgarvan.\nBelow."
@@ -190,9 +190,9 @@ test_render_from_filename_with_json_in_layout :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename_with_json_in_layout_file :: proc(t: ^testing.T) {
-	template := "spec/examples/template.txt"
-	json := "spec/examples/data.json"
-	layout := "spec/examples/layout.txt"
+	template := "test/template.txt"
+	json := "test/data.json"
+	layout := "test/layout.txt"
 
 	exp_output := "Begin layout >>\nHello, this is Kilgarvan.\n<< End layout\n"
 	output, _ := render_from_filename_with_json_in_layout_file(template, json, layout)
