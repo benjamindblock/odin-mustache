@@ -1,0 +1,25 @@
+name: CI
+on:
+  push:
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v1
+      - uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test
+        run: make test
+        timeout-minutes: 1
+      - name: Lint
+        run: make check
+        timeout-minutes: 1
