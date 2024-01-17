@@ -1158,7 +1158,7 @@ load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
 		v: any = runtime.new_clone(fmt.tprintf("%v", _val))^
 		loaded = v
 	case i64, f64:
-		str := fmt.tprintf("%v", _val)
+		str := fmt.tprintf("%.2f", val)
 		decimal_str: any = runtime.new_clone(trim_decimal_string(str))^
 		loaded = decimal_str
 	case json.Object:
