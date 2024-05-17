@@ -1095,14 +1095,13 @@ template_eat_tokens :: proc(tmpl: ^Template, sb: ^strings.Builder) {
 
 template_render :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) {
 	sb := strings.builder_make(context.temp_allocator)
-	defer strings.builder_destroy(&sb)
 
 	template_eat_tokens(tmpl, &sb)
 	rendered := strings.to_string(sb) 
 
 	if tmpl.layout != "" {
+		defer strings.builder_destroy(&sb)
 		sbl := strings.builder_make(context.temp_allocator)
-		defer strings.builder_destroy(&sbl)
 
 		// Parse the layout
 		layout_lexer: Lexer
