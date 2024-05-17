@@ -1057,7 +1057,7 @@ template_eat_tokens :: proc(tmpl: ^Template, sb: ^strings.Builder) {
 	// First pass to find all the whitespace/newline elements that should be skipped.
 	// This is performed up-front due to partial templates -- we cannot check for the
 	// whitespace logic *after* the partials have been injected into the template.
-	for &t, i in tmpl.lexer.tokens {
+	for &t in tmpl.lexer.tokens {
 		if lexer_token_should_skip(tmpl.lexer, t) {
 			t.type = .Skip
 		}
@@ -1162,9 +1162,9 @@ load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
 		loaded = decimal_str
 	case json.Object:
 		data := JSON_Map{}
-		for key, val in _val {
-			new_k := fmt.tprintf("%v", key)
-			data[new_k] = load_json(val)
+		for k, v in _val {
+			new_k := fmt.tprintf("%v", k)
+			data[new_k] = load_json(v)
 		}
 		loaded = data
 	case json.Array:
