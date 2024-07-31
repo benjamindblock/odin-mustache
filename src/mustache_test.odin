@@ -1,5 +1,7 @@
 package mustache
 
+import "base:runtime"
+
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
@@ -28,12 +30,11 @@ Test_Data :: union {
 }
 
 load_spec :: proc(filename: string) -> (json.Value) {
-	data, ok := os.read_entire_file_from_filename(filename)
+	data, ok := os.read_entire_file_from_filename(filename, context.temp_allocator)
 	if !ok {
 		fmt.println("Failed to load the file!")
 		os.exit(1)
 	}
-	defer delete(data)
 
 	json_data, err := json.parse(data)
 	if err != .None {
@@ -73,76 +74,95 @@ assert_mustache :: proc(
 ) {
 	output, _ := render(input, data, partials)
 	testing.expect_value(t, output, exp_output, loc)
+
+	delete(output)
 }
 
 @(test)
 test_render :: proc(t: ^testing.T) {
 	template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
-	data := Test_Map {
-		"x" = "Vincent",
-		"y" = "R2D2",
-	}
+
+	data := make(Test_Map, 2, context.temp_allocator)
+	data["x"] = "Vincent"
+	data["y"] = "R2D2"
 
 	exp_output := "Hello, Vincent, nice to meet you. My name is R2D2."
 	output, _ := render(template, data)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
 test_render_in_layout :: proc(t: ^testing.T) {
 	template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
-	data := Test_Map {
-		"x" = "Vincent",
-		"y" = "R2D2",
-	}
+
+	data := make(Test_Map, 2, context.temp_allocator)
+	data["x"] = "Vincent"
+	data["y"] = "R2D2"
+
 	layout := "\nAbove.\n{{content}}\nBelow."
 
 	exp_output := "\nAbove.\nHello, Vincent, nice to meet you. My name is R2D2.\nBelow."
 	output, _ := render_in_layout(template, data, layout)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
 test_render_in_layout_file :: proc(t: ^testing.T) {
 	template := "Hello, {{name}}."
-	data := Test_Map{"name" = "Vincent"}
+	data := make(Test_Map, 1, context.temp_allocator)
+	data["name"] = "Vincent"
 	layout := "test/layout.txt"
 
 	exp_output := "Begin layout >>\nHello, Vincent.\n<< End layout\n"
 	output, _ := render_in_layout_file(template, data, layout)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
 test_render_from_filename :: proc(t: ^testing.T) {
 	template := "test/template.txt"
-	data := Test_Map{"name" = "Vincent"}
+	data := make(Test_Map, 1, context.temp_allocator)
+	data["name"] = "Vincent"
 
 	exp_output := "Hello, this is Vincent.\n"
 	output, _ := render_from_filename(template, data)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
 test_render_from_filename_in_layout :: proc(t: ^testing.T) {
 	template := "test/template.txt"
-	data := Test_Map{"name" = "Vincent"}
+	data := make(Test_Map, 1, context.temp_allocator)
+	data["name"] = "Vincent"
 	layout := "\nAbove.\n{{content}}\nBelow."
 
 	exp_output := "\nAbove.\nHello, this is Vincent.\nBelow."
 	output, _ := render_from_filename_in_layout(template, data, layout)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
 test_render_from_filename_in_layout_file :: proc(t: ^testing.T) {
 	template := "test/template.txt"
-	data := Test_Map{"name" = "Vincent"}
+	data := make(Test_Map, 1, context.temp_allocator)
+	data["name"] = "Vincent"
 	layout := "test/layout.txt"
 
 	exp_output := "Begin layout >>\nHello, this is Vincent.\n<< End layout\n"
 	output, _ := render_from_filename_in_layout_file(template, data, layout)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
@@ -153,6 +173,8 @@ test_render_with_json :: proc(t: ^testing.T) {
 	exp_output := "Hello, Kilgarvan."
 	output, _ := render_with_json(template, json)
 	testing.expect_value(t, output, exp_output)
+
+	defer(delete(output))
 }
 
 @(test)
@@ -164,6 +186,8 @@ test_render_with_json_in_layout :: proc(t: ^testing.T) {
 	exp_output := "\nAbove.\nHello, Kilgarvan.\nBelow."
 	output, _ := render_with_json_in_layout(template, json, layout)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
@@ -175,6 +199,8 @@ test_render_with_json_in_layout_file :: proc(t: ^testing.T) {
 	exp_output := "Begin layout >>\nHello, Kilgarvan.\n<< End layout\n"
 	output, _ := render_with_json_in_layout_file(template, json, layout)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
@@ -186,6 +212,8 @@ test_render_from_filename_with_json_in_layout :: proc(t: ^testing.T) {
 	exp_output := "\nAbove.\nHello, this is Kilgarvan.\nBelow."
 	output, _ := render_from_filename_with_json_in_layout(template, json, layout)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
@@ -197,6 +225,8 @@ test_render_from_filename_with_json_in_layout_file :: proc(t: ^testing.T) {
 	exp_output := "Begin layout >>\nHello, this is Kilgarvan.\n<< End layout\n"
 	output, _ := render_from_filename_with_json_in_layout_file(template, json, layout)
 	testing.expect_value(t, output, exp_output)
+
+	delete(output)
 }
 
 @(test)
@@ -220,12 +250,12 @@ test_struct_union :: proc(t: ^testing.T) {
 test_struct_inside_map :: proc(t: ^testing.T) {
 	template := "Hello, {{name}}. Send an email to {{#email}}{{address}}{{/email}}."
 
-	data: map[string]Test_Data = {
-		"name" = "Vincent",
-		"email" = Test_Map {
-			"address" = "foo@example.com",
-		},
-	}
+	data := make(map[string]Test_Data, 2, context.temp_allocator)
+	data["name"] = "Vincent"
+	data["email"] = make(Test_Map, 1, context.temp_allocator)
+	email := data["email"].(Test_Map)
+	email["address"] = "foo@example.com"
+	data["email"] = email
 
 	exp_output := "Hello, Vincent. Send an email to foo@example.com."
 	assert_mustache(t, template, data, exp_output)
@@ -234,9 +264,11 @@ test_struct_inside_map :: proc(t: ^testing.T) {
 @(test)
 test_list :: proc(t: ^testing.T) {
 	template := "{{#names}}{{.}}{{/names}}"
-	data := map[string][dynamic]string {
-		"names" = [dynamic]string{"Helena", " Bloomington"},
-	}
+
+	data := make(map[string][dynamic]string, 1, context.temp_allocator)
+	names := make([dynamic]string, 2, context.temp_allocator)
+	append(&names, "Helena", " Bloomington")
+	data["names"] = names
 
 	exp_output := "Helena Bloomington"
 	assert_mustache(t, template, data, exp_output)
@@ -256,6 +288,8 @@ test_literal_tag :: proc(t: ^testing.T) {
 	data := Test_Map {
 		"verb1" = "I like < >",
 	}
+	defer(delete(data))
+
 	exp_output := "Hello, I like < >."
 	assert_mustache(t, template, data, exp_output)
 }
@@ -352,6 +386,7 @@ test_partials_spec :: proc(t: ^testing.T) {
 		input := load_json(data)
 		partials := test_obj["partials"]
 		partials_input := load_json(partials).(JSON_Map)
+
 		assert_mustache(t, template, input, exp_output, partials_input)
 	}
 }
@@ -391,62 +426,67 @@ test_partials_spec :: proc(t: ^testing.T) {
 test_map_get :: proc(t: ^testing.T) {
 	// Get the value in a map with one key.
 	output: any
-	output, _ = map_get(
-		map[string]string{"name" = "George"},
-		"name",
-	)
+	mss := make(map[string]string, allocator = context.temp_allocator)
+	mcs := make(map[cstring]string, allocator = context.temp_allocator)
+	msi := make(map[string]int, allocator = context.temp_allocator)
+	mis := make(map[int]string, allocator = context.temp_allocator)
+
+	tm := make(Test_Map, allocator = context.temp_allocator)
+	mtm := make(map[string]Test_Map, allocator = context.temp_allocator)
+
+	u: Test_Data
+	u = make(Test_Map, allocator = context.temp_allocator)
+
+	// Simple map
+	delete(mss)
+	mss["name"] = "George"
+	output, _ = map_get(mss, "name")
 	testing.expect_value(t, output.(string), "George")
 
 	// Get the value in a map with one key when key is cstring.
-	output, _ = map_get(
-		map[cstring]string{"name" = "George"},
-		"name",
-	)
+	delete(mcs)
+	mcs["name"] = "George"
+	output, _ = map_get(mcs, "name")
 	testing.expect_value(t, output.(string), "George")
 
 	// Get the first value in a map with multiple keys.
-	output, _ = map_get(
-		map[string]string{
-			"name" = "George",
-			"hometown" = "Helena",
-		},
-		"name",
-	)
+	delete(mss)
+	mss["name"] = "George"
+	mss["hometown"] = "Helena"
+	output, _ = map_get(mss, "name")
 	testing.expect_value(t, output.(string), "George")
 
 	// Get the second value in a map with multiple keys.
-	output, _ = map_get(
-		map[string]string{
-			"name" = "George",
-			"hometown" = "Helena",
-		},
-		"hometown",
-	)
+	delete(mss)
+	mss["name"] = "George"
+	mss["hometown"] = "Helena"
+	output, _ = map_get(mss, "hometown")
 	testing.expect_value(t, output.(string), "Helena")
 
 	// Get an int
-	output, _ = map_get(
-		map[string]int{"phone_number" = 5555555555},
-		"phone_number",
-	)
+	delete(msi)
+	msi["phone_number"] = 5555555555
+	output, _ = map_get(msi, "phone_number")
 	testing.expect_value(t, output.(int), 5555555555)
 
 	// Nested, named map.
-	data := Test_Map{"name" = "Lee"}
-	output, _ = map_get(
-		map[string]Test_Map{"person" = data},
-		"person",
-	)
-	testing.expect_value(t, output.(Test_Map)["name"], data["name"])
+	delete(tm)
+	delete(mtm)
+	tm["name"] = "Lee"
+	mtm["person"] = tm
+	output, _ = map_get(mtm, "person")
+	testing.expect_value(t, output.(Test_Map)["name"], tm["name"])
 
 	// Extract from a map type inside a union.
-	u_map: Test_Data
-	u_map = Test_Map{"name" = "St. Charles"}
-	output, _ = map_get(u_map, "name")
-	testing.expect_value(t, output.(string), u_map.(Test_Map)["name"])
+	delete(u.(Test_Map))
+	(&u.(Test_Map))["name"] = "St. Charles"
+	output, _ = map_get(u, "name")
+	testing.expect_value(t, output.(string), u.(Test_Map)["name"])
 
 	// Return nil when the map is NOT keyed by string, cstring
-	output, _ = map_get(map[int]string{1 = "Customer 1"}, "1")
+	delete(mis)
+	mis[1] = "Customer 1"
+	output, _ = map_get(mis, "1")
 	testing.expect(t, reflect.is_nil(output))
 }
 
@@ -468,7 +508,9 @@ test_struct_get :: proc(t: ^testing.T) {
 		"String argument that is NOT a Struct returns nil",
 	)
 
-	output = struct_get(Test_Map{"name" = "Lee"}, "name")
+	test_map := make(Test_Map, allocator = context.temp_allocator)
+	test_map["name"] = "Lee"
+	output = struct_get(test_map, "name")
 	testing.expect(
 		t,
 		reflect.is_nil(output),
@@ -484,17 +526,13 @@ test_struct_get :: proc(t: ^testing.T) {
 
 @(test)
 test_is_map :: proc(t: ^testing.T) {
-	assert(
-		t,
-		is_map(map[string]string{"Vincent" = "Edgar"}),
-		"Regular map should return true",
-	)
+	m := map[string]string{"Vincent" = "Edgar"}
+	assert(t, is_map(m), "Regular map should return true")
+	delete(m)
 
-	assert(
-		t,
-		is_map(Test_Map{"name" = "Lee"}),
-		"Named map should return true",
-	)
+	m = Test_Map{"name" = "Lee"}
+	assert(t, is_map(m), "Named map should return true")
+	delete(m)
 
 	data: Test_Data
 	data = Test_Map{ "name" = "Vincent" }
@@ -503,6 +541,7 @@ test_is_map :: proc(t: ^testing.T) {
 		is_map(data),
 		"Union with Map variant should be considered a Map",
 	)
+	delete(data.(Test_Map))
 
 	data = Test_List{ "foo", "bar", "baz" }
 	assert_not(
@@ -510,6 +549,7 @@ test_is_map :: proc(t: ^testing.T) {
 		is_map(data),
 		"Union with list variant should not be considered a Map",
 	)
+	delete(data.(Test_List))
 
 	assert_not(
 		t,
@@ -532,18 +572,20 @@ test_is_list :: proc(t: ^testing.T) {
 	assert(t, is_list(arr), "Array should be considered a list")
 	assert(t, is_list(arr[:]), "Slice should be considered a list")
 
-	dyn_arr := [dynamic]string{"element1"}
+	dyn_arr := make([dynamic]string, 1, 1, allocator = context.temp_allocator)
+	append(&dyn_arr, "element1")
 	assert(t, is_list(dyn_arr), "Dynamic array should be considered a list")
 
 	u_arr: Test_Data
-	u_arr = Test_List{"element1"}
+	u_arr = make(Test_List, 1, 1, allocator = context.temp_allocator)
+	append(&u_arr.(Test_List), "element1")
 	assert(t, is_list(u_arr), "Dynamic array in a union should be considered a list")
 
 	assert_not(t, is_list("foo"), "string should not be considered a list")
 	assert_not(t, is_list(1), "int should not be considered a list")
 
 	u_map: Test_Data
-	u_map = Test_Map{"name" = "Sal"}
+	u_map = make(Test_Map, 1, allocator = context.temp_allocator)
 	assert_not(
 		t,
 		is_list(u_map),
@@ -568,14 +610,15 @@ test_is_struct :: proc(t: ^testing.T) {
 	)
 
 	data: Test_Data
-	data = Test_Map{"name" = "Vincent"}
+	data = make(Test_Map, allocator = context.temp_allocator)
 	assert_not(
 		t,
 		is_struct(data),
 		"Union with map variant should not be considered a Struct",
 	)
 
-	data = Test_List{"foo", "bar", "baz"}
+	data = make(Test_List, allocator = context.temp_allocator)
+	append(&data.(Test_List), "foo", "bar", "baz")
 	assert_not(
 		t,
 		is_struct(data),
@@ -585,42 +628,41 @@ test_is_struct :: proc(t: ^testing.T) {
 
 @(test)
 test_is_union :: proc(t: ^testing.T) {
-	data: Test_Data
-	data = Test_Map{ "name" = "Vincent" }
+	u: Test_Data
+	u = make(Test_Map, allocator = context.temp_allocator)
 	assert(
 		t,
-		is_union(data),
+		is_union(u),
 		"Union is union",
 	)
 
+
+	tm := make(Test_Map, allocator = context.temp_allocator)
 	assert_not(
 		t,
-		is_union(Test_Map{"name" = "Vincent"}),
+		is_union(tm),
 		"Union member with a type is not a union",
 	)
 
+	tl := make(Test_List, allocator = context.temp_allocator)
 	assert_not(
 		t,
-		is_union(Test_List{"foo", "bar", "baz"}),
+		is_union(tl),
 		"Union member with a type is not a union",
 	)
 
+	m := make(map[string]string, allocator = context.temp_allocator)
 	assert_not(
 		t,
-		is_union(map[string]string{"Vincent" = "Edgar"}),
+		is_union(m),
 		"Map should not be a union",
 	)
 
+	ts := Test_Struct{"Vincent", "foo@example.com"}
 	assert_not(
 		t,
-		is_union(Test_Struct{"Vincent", "foo@example.com"}),
+		is_union(ts),
 		"Struct should not be a union",
-	)
-
-	assert_not(
-		t,
-		is_union(Test_Map{"name" = "Lee"}),
-		"Named map should not be a union",
 	)
 }
 
@@ -628,10 +670,11 @@ test_is_union :: proc(t: ^testing.T) {
 test_data_len :: proc(t: ^testing.T) {
 	data: any
 
-	data = [dynamic]string{}
+	data = make([dynamic]string, allocator = context.temp_allocator)
 	testing.expect_value(t, data_len(data), 0)
 
-	data = [dynamic]string{"Vincent"}
+	data = make([dynamic]string, allocator = context.temp_allocator)
+	append(&data.([dynamic]string), "Vincent")
 	testing.expect_value(t, data_len(data), 1)
 
 	data = "FooBar"
@@ -644,7 +687,8 @@ test_data_len :: proc(t: ^testing.T) {
 	u = Test_Struct{"Vincent", "foo@example.com"}
 	testing.expect_value(t, data_len(u), 2)
 
-	u = Test_Map{"name" = "St. Charles"}
+	u = make(Test_Map, allocator = context.temp_allocator)
+	(&u.(Test_Map))["name"] = "St. Charles"
 	testing.expect_value(t, data_len(u), 1)
 }
 
@@ -655,12 +699,14 @@ test_has_key :: proc(t: ^testing.T) {
 	data = Test_Struct{"St. Charles", "foo@example.com"}
 	assert(t, has_key(data, "name"), "Should return true if stuct has field")
 
-	data = map[string]int{"A1" = 1}
+	data = make(map[string]int, allocator = context.temp_allocator)
+	(&data.(map[string]int))["A1"] = 1
 	assert(t, has_key(data, "A1"), "Should return true if map has key")
 	assert_not(t, has_key(data, "B2"), "Should return false if map does not have key")
 
 	u: Test_Data
-	u = Test_Map{"name" = "St. Charles"}
+	u = make(Test_Map, allocator = context.temp_allocator)
+	(&u.(Test_Map))["name"] = "St. Charles"
 	assert(t, has_key(u, "name"), "Should return true if union-map has key")
 	assert_not(t, has_key(u, "email"), "Should return false if union-map does not have key")
 
@@ -678,7 +724,7 @@ test_list_at :: proc(t: ^testing.T) {
 	testing.expect_value(t, list_at(arr[:], 0).(string), "foo")
 	testing.expect_value(t, list_at(arr[:], 1).(string), "bar")
 
-	dyn := slice.clone_to_dynamic(arr[:])
+	dyn := slice.clone_to_dynamic(arr[:], allocator = context.temp_allocator)
 	testing.expect_value(t, list_at(dyn, 0).(string), "foo")
 	testing.expect_value(t, list_at(dyn, 1).(string), "bar")
 }
@@ -686,91 +732,102 @@ test_list_at :: proc(t: ^testing.T) {
 @(test)
 test_dig :: proc(t: ^testing.T) {
 	output: any
-	data: any
-	keys: [dynamic]string
+	keys := make([dynamic]string, allocator = context.temp_allocator)
 
 	// Pull out a struct value
-	data = Test_Struct{"Vincent", "foo@example.com"}
-	keys = {"name"}
-	output = dig(data, keys[:])
+	d1: any
+	d1 = Test_Struct{"Vincent", "foo@example.com"}
+	append(&keys, "name")
+	output = dig(d1, keys[:])
 	testing.expect_value(t, output.(string), "Vincent")
+	delete(keys)
 
 	// Pull out a map value
-	data = map[string]string {
-		"name" = "Edgar",
-	}
+	d2: any
+	d2 = make(map[string]string, allocator = context.temp_allocator)
+	(&d2.(map[string]string))["name"] = "Edgar"
 	keys = {"name"}
-	output = dig(data, keys[:])
+	output = dig(d2, keys[:])
 	testing.expect_value(t, output.(string), "Edgar")
+	delete(keys)
 
 	// Pull out a nested map value
-	data = map[string]map[string]string {
-		"customer1" = map[string]string {
-			"name" = "Kurt",
-			"email" = "test@example.com",
-		},
-	}
+	d3: any
+	d3 = make(map[string]map[string]string, allocator = context.temp_allocator)
+	c1 := make(map[string]string, allocator = context.temp_allocator)
+	c1["name"] = "Kurt"
+	c1["email"] = "test@example.com"
+	(&d3.(map[string]map[string]string))["customer1"] = c1
 	keys = {"customer1", "email"}
-	output = dig(data, keys[:])
+	output = dig(d3, keys[:])
 	testing.expect_value(t, output.(string), "test@example.com")
+	delete(keys)
 
 	// Pull out a nested map
-	nested := map[string]string {
-		"name" = "Kurt",
-		"email" = "test@example.com",
-	}
-	data = map[string]map[string]string {
-		"customer1" = nested,
-	}
+	d4 := make(map[string]map[string]string, allocator = context.temp_allocator)
+	c2 := make(map[string]string, allocator = context.temp_allocator)
+	c2["name"] = "Kurt"
+	c2["email"] = "test@example.com"
+	d4["customer1"] = c2
 	keys = {"customer1"}
-	output = dig(data, keys[:])
-	testing.expect_value(t, output.(map[string]string)["name"], nested["name"])
-	testing.expect_value(t, output.(map[string]string)["email"], nested["email"])
+	output = dig(d4, keys[:])
+	testing.expect_value(t, output.(map[string]string)["name"], "Kurt")
+	testing.expect_value(t, output.(map[string]string)["email"], "test@example.com")
+	delete(keys)
 
 	// Pull out a list
-	data = Test_List{"El1", "El2"}
+	d5: any
+	d5 = Test_List{"El1", "El2"}
 	keys = {"key1"}
-	output = dig(data, keys[:])
-	testing.expect_value(t, output.(Test_List)[0], data.(Test_List)[0])
-	testing.expect_value(t, output.(Test_List)[1], data.(Test_List)[1])
+	output = dig(d5, keys[:])
+	testing.expect_value(t, output.(Test_List)[0], d5.(Test_List)[0])
+	testing.expect_value(t, output.(Test_List)[1], d5.(Test_List)[1])
+	delete(d5.(Test_List))
+	delete(keys)
 
 	// Pull out a struct inside a map
-	data = map[string]Test_Struct {
-		"customer1" = Test_Struct{"Vincent", "foo@example.com"},
-	}
+	d6: any
+	d6 = make(map[string]Test_Struct, allocator = context.temp_allocator)
+	c3 := Test_Struct{"Vincent", "foo@example.com"}
+	(&d6.(map[string]Test_Struct))["customer1"] = c3
 	keys = {"customer1", "email"}
-	output = dig(data, keys[:])
+	output = dig(d6, keys[:])
 	testing.expect_value(t, output.(string), "foo@example.com")
+	delete(keys)
 
 	// Pull out a string with dot notation
-	data = "Hello, world!"
+	d7 := "Hello, world!"
 	keys = {"."}
-	output = dig(data, keys[:])
+	output = dig(d7, keys[:])
 	testing.expect_value(t, output.(string), "Hello, world!")
+	delete(keys)
 
 	// Return nil when string and not dot notation.
-	data = "Hello, world!"
+	d8 := "Hello, world!"
 	keys = {"XXX"}
-	output = dig(data, keys[:])
+	output = dig(d8, keys[:])
 	assert(t, reflect.is_nil(output), "Nil string when a key that is not '.' is provided.")
+	delete(keys)
 
 	// Pull out a nil struct value
-	data = Test_Struct{"Vincent", "foo@example.com"}
+	d9 := Test_Struct{"Vincent", "foo@example.com"}
 	keys = {"XXX"}
-	output = dig(data, keys[:])
+	output = dig(d9, keys[:])
 	assert(t, reflect.is_nil(output), "Struct without a matching field should be nil")
+	delete(keys)
 
 	// Pull out a nil struct value with multiple keys
-	data = Test_Struct{"Vincent", "foo@example.com"}
+	d10 := Test_Struct{"Vincent", "foo@example.com"}
 	keys = {"XXX", "YYY"}
-	output = dig(data, keys[:])
+	output = dig(d10, keys[:])
 	assert(t, reflect.is_nil(output), "Struct without a matching field should be nil")
+	delete(keys)
 
 	// Pull out a nil struct value
-	data = map[string]string {
-		"name" = "Vincent",
-	}
+	d11 := make(map[string]string, allocator = context.temp_allocator)
+	d11["name"] = "Vincent"
 	keys = {"XXX"}
-	output = dig(data, keys[:])
+	output = dig(d11, keys[:])
 	assert(t, reflect.is_nil(output), "Map without a matching field should be nil")
+	delete(keys)
 }
