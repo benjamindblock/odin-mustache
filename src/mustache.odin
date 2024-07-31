@@ -1,11 +1,12 @@
 package mustache
 
+import "base:runtime"
+
 import "core:encoding/json"
 import "core:fmt"
 import "core:mem"
 import "core:os"
 import "core:reflect"
-import "core:runtime"
 import "core:slice"
 import "core:strings"
 
@@ -117,7 +118,7 @@ Template_Error :: union {
 }
 
 Template :: struct {
-	lexer: Lexer,
+	lexer: ^Lexer,
 	data: any,
 	partials: any,
 	context_stack: [dynamic]Context_Stack_Entry,
@@ -137,24 +138,24 @@ Data_Type :: enum {
 	Null,
 }
 
-// 1. A map from string => JSON_Data
-// 2. A list of JSON_Data
-// 3. A value of some kind (string, int, etc.)
-JSON_Map :: distinct map[string]JSON_Data
-JSON_List :: distinct [dynamic]JSON_Data
-JSON_Data :: union {
-	JSON_Map,
-	JSON_List,
-	any,
-}
+// Returns true if the value is one of the "falsey" values
+// for a context.
+@(private)
+_falsey_context := make(map[string]bool)
+
+// Returns true if the value is one of the "falsey" values
+// for a context.
+@(private)
+_whitespace := make(map[rune]bool)
+
 
 /*
 	UTILITY PROCEDURES
 */
 
-trim_decimal_string :: proc(s: string) -> string {
+trim_decimal_string :: proc(s: string, allocator := context.allocator) -> string {
 	if len(s) == 0 || s[len(s)-1] != '0' {
-		return s
+		return strings.clone(s[:], allocator = allocator)
 	}
 
 	// We have at least one trailing zero. Search backwards and find the rest.
@@ -170,22 +171,20 @@ trim_decimal_string :: proc(s: string) -> string {
 				// Removes point completely for numbers like 0.000
 				trailing_start_idx = i
 			}
-			return s[:trailing_start_idx]
+			return strings.clone(s[:trailing_start_idx], allocator = allocator)
 		}
 	}
 
-	return s
+	return strings.clone(s[:], allocator = allocator)
 }
 
 escape_html_string :: proc(s: string, allocator := context.allocator) -> string {
-	context.allocator = allocator
-
 	escaped := s
 	// Ampersand escaping goes first.
-	escaped, _ = strings.replace_all(escaped, "&", HTML_AMPERSAND)
-	escaped, _ = strings.replace_all(escaped, "<", HTML_LESS_THAN)
-	escaped, _ = strings.replace_all(escaped, ">", HTML_GREATER_THAN)
-	escaped, _ = strings.replace_all(escaped, "\"", HTML_QUOTE)
+	escaped, _ = strings.replace_all(escaped, "&", HTML_AMPERSAND, allocator = allocator)
+	escaped, _ = strings.replace_all(escaped, "<", HTML_LESS_THAN, allocator = allocator)
+	escaped, _ = strings.replace_all(escaped, ">", HTML_GREATER_THAN, allocator = allocator)
+	escaped, _ = strings.replace_all(escaped, "\"", HTML_QUOTE, allocator = allocator)
 	return escaped
 }
 
@@ -416,29 +415,15 @@ map_has_key :: proc(v: any, map_key: string) -> (has: bool) {
 	return false
 }
 
-// Returns true if the value is one of the "falsey" values
-// for a context.
-@(private) _falsey_context := map[string]bool{
-	FALSEY = true,
-	"null" = true,
-	"" = true,
-}
-
-// Returns true if the value is one of the "falsey" values
-// for a context.
-@(private) _whitespace := map[rune]bool{
-	' ' = true,
-	'\t' = true,
-	'\r' = true,
-}
-
 /*
 	LEXER-RELATED PROCEDURES
 */
 
-lexer_delete :: proc(l: ^Lexer) {
-	delete(l.tag_stack)
-	delete(l.tokens)
+lexer_make :: proc() -> ^Lexer {
+	l := new(Lexer, context.temp_allocator)
+	l.tokens = make([dynamic]Token, 0, context.temp_allocator)
+	l.tag_stack = make([dynamic]rune, 0, context.temp_allocator)
+	return l
 }
 
 lexer_peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
@@ -530,7 +515,7 @@ lexer_append_tag :: proc(l: ^Lexer, token_type: Token_Type) {
 		// Remove all empty whitespace inside a valid tag so that we don't
 		// mess up our access of the data.
 		token_text := l.src[pos.start:pos.end]
-		token_text, _ = strings.remove_all(token_text, " ")
+		token_text, _ = strings.remove_all(token_text, " ", allocator = context.temp_allocator)
 		token := Token{type=token_type, value=token_text, pos=pos}
 		append(&l.tokens, token)
 	}
@@ -613,13 +598,13 @@ lexer_parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
 	return nil
 }
 
-lexer_print_tokens :: proc(l: Lexer) {
+lexer_print_tokens :: proc(l: ^Lexer) {
 	for t, i in l.tokens {
 		fmt.println(i, "    ", t)
 	}
 }
 
-lexer_token_should_skip :: proc(l: Lexer, t: Token) -> (skip: bool) {
+lexer_token_should_skip :: proc(l: ^Lexer, t: Token) -> (skip: bool) {
 	switch t.type {
 	case .Newline:
 		skip = lexer_should_skip_newline_token(l, t)
@@ -635,7 +620,7 @@ lexer_token_should_skip :: proc(l: Lexer, t: Token) -> (skip: bool) {
 }
 
 // Retrieves all the tokens that are on a given line of the input text.
-lexer_tokens_on_same_line :: proc(l: Lexer, line: int) -> (tokens: []Token) {
+lexer_tokens_on_same_line :: proc(l: ^Lexer, line: int) -> (tokens: []Token) {
 	on_line := false
 	start_i: int
 	end_i: int
@@ -665,7 +650,7 @@ lexer_tokens_on_same_line :: proc(l: Lexer, line: int) -> (tokens: []Token) {
 
 // Skip a newline if we are on a line that has either a
 // non-blank .Text token OR any valid tags.
-lexer_should_skip_newline_token :: proc(l: Lexer, token: Token) -> bool {
+lexer_should_skip_newline_token :: proc(l: ^Lexer, token: Token) -> bool {
 	on_line := lexer_tokens_on_same_line(l, token.pos.line)
 
 	// If the newline is the only token present, do not skip it.
@@ -692,7 +677,7 @@ lexer_should_skip_newline_token :: proc(l: Lexer, token: Token) -> bool {
 // If we are rendering a .Text tag, we should NOT render it if it is:
 //  - On a line with one .Section tag, AND
 //  - comprised of only whitespace, along with all the other .Text tokens
-lexer_should_skip_text_token :: proc(l: Lexer, token: Token) -> bool {
+lexer_should_skip_text_token :: proc(l: ^Lexer, token: Token) -> bool {
 	on_line := lexer_tokens_on_same_line(l, token.pos.line)
 
 	standalone_tag_count := 0
@@ -717,7 +702,7 @@ lexer_should_skip_text_token :: proc(l: Lexer, token: Token) -> bool {
 }
 
 // Checks if a given .Partial Token is "standalone."
-lexer_token_is_standalone_partial :: proc(l: Lexer, token: Token) -> bool {
+lexer_token_is_standalone_partial :: proc(l: ^Lexer, token: Token) -> bool {
 	on_line := lexer_tokens_on_same_line(l, token.pos.line)
 
 	standalone_tag_count := 0
@@ -745,8 +730,11 @@ lexer_token_is_standalone_partial :: proc(l: Lexer, token: Token) -> bool {
 	TEMPLATE-RELATED PROCEDURES
 */
 
-template_delete :: proc(t: ^Template) {
-	delete(t.context_stack)
+template_make :: proc(l: ^Lexer) -> ^Template {
+	t := new(Template, context.temp_allocator)
+	t.lexer = l
+	t.context_stack = make([dynamic]Context_Stack_Entry, 0, context.temp_allocator)
+	return t
 }
 
 // Sections can have false-y values in their corresponding data. When this
@@ -780,7 +768,10 @@ template_token_is_valid :: proc(tmpl: ^Template, token: Token) -> (bool) {
 	return false
 }
 
-template_string_from_key :: proc(tmpl: ^Template, key: string) -> (s: string) {
+template_string_from_key :: proc(
+	tmpl: ^Template,
+	key: string,
+) -> (s: string) {
 	resolved: any
 
 	if key == "." {
@@ -788,7 +779,7 @@ template_string_from_key :: proc(tmpl: ^Template, key: string) -> (s: string) {
 	} else {
 		// If the top of the stack is a string and we need to access a hash of data,
 		// dig from the layer beneath the top.
-		ids := strings.split(key, ".", allocator=context.temp_allocator)
+		ids := strings.split(key, ".", allocator = context.temp_allocator)
 		for ctx in tmpl.context_stack {
 			resolved = dig(ctx.data, ids[0:1])
 			if resolved != nil {
@@ -835,7 +826,7 @@ template_get_data_for_stack :: proc(tmpl: ^Template, data_id: string) -> (data: 
 
 	// If we still can't find anything, mark this section as false-y.
 	if reflect.is_nil(data) {
-		return runtime.new_clone(FALSEY)^
+		return runtime.new_clone(FALSEY, allocator = context.temp_allocator)^
 	} else {
 		return data
 	}
@@ -930,7 +921,7 @@ token_content :: proc(tmpl: ^Template, t: Token) -> (s: string) {
 		}
 	case .Tag:
 		s = template_string_from_key(tmpl, t.value)
-		s = escape_html_string(s)
+		s = escape_html_string(s, allocator = context.temp_allocator)
 	case .Tag_Literal, .Tag_Literal_Triple:
 		s = template_string_from_key(tmpl, t.value)
 	case .Newline:
@@ -965,12 +956,11 @@ template_insert_partial :: proc(
 	partial_content := dig(tmpl.partials, []string{partial_name})
 	partial_str, _ := any_to_string(partial_content)
 
-	lexer := Lexer{
-		src=partial_str,
-		line=token.pos.line,
-		delim=CORE_DEF,
-	}
-	lexer_parse(&lexer) or_return
+	lexer := lexer_make()
+	lexer.src = partial_str
+	lexer.line = token.pos.line
+	lexer.delim = CORE_DEF
+	lexer_parse(lexer) or_return
 
 	// Performs any indentation on the .Partial that we are inserting.
 	//
@@ -1013,11 +1003,11 @@ template_insert_content_into_layout :: proc(
 	offset: int,
 	content: string,
 ) -> (err: Lexer_Error) {
-	lexer: Lexer
+	lexer := lexer_make()
 	lexer.src = content
 	lexer.line = token.pos.line
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Performs indentation on the content.
 	if offset > 0 {
@@ -1100,28 +1090,27 @@ template_render :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) 
 	rendered := strings.to_string(sb) 
 
 	if tmpl.layout != "" {
-		defer strings.builder_destroy(&sb)
 		sbl := strings.builder_make(context.temp_allocator)
 
 		// Parse the layout
-		layout_lexer: Lexer
+		layout_lexer := lexer_make()
 		layout_lexer.src = tmpl.layout
 		layout_lexer.delim = CORE_DEF
-		lexer_parse(&layout_lexer) or_return
+		lexer_parse(layout_lexer) or_return
 
 		// The Layout template will have no partials or layouts.
-		layout_template: Template
-		defer template_delete(&layout_template)
-		layout_template.lexer = layout_lexer
-		layout_template.data = map[string]string {}
+		// layout_template: Template
+		layout_template := template_make(layout_lexer)
 
+		// TODO: Could we directly index the special {{content}} tag so that
+		// we don't need to search it here by iterating and just get it?
 		for t, i in layout_lexer.tokens {
 			if token_is_tag(t) && t.value == "content" {
-				template_insert_content_into_layout(&layout_template, t, i, rendered)
+				template_insert_content_into_layout(layout_template, t, i, rendered)
 			}
 		}
 
-		template_eat_tokens(&layout_template, &sbl)
+		template_eat_tokens(layout_template, &sbl)
 		rendered = strings.to_string(sbl)
 	}
 
@@ -1149,34 +1138,6 @@ data_len :: proc(obj: any) -> (l: int) {
 	}
 
 	return l
-}
-
-load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
-	switch _val in val {
-	case bool, string:
-		v: any = runtime.new_clone(fmt.tprintf("%v", _val))^
-		loaded = v
-	case i64, f64:
-		str := fmt.tprintf("%.2f", val)
-		decimal_str: any = runtime.new_clone(trim_decimal_string(str))^
-		loaded = decimal_str
-	case json.Object:
-		data := JSON_Map{}
-		for k, v in _val {
-			new_k := fmt.tprintf("%v", k)
-			data[new_k] = load_json(v)
-		}
-		loaded = data
-	case json.Array:
-		data := JSON_List{}
-		for v in _val {
-			append(&data, load_json(v))
-		}
-		loaded = data
-	case json.Null:
-	}
-
-	return loaded
 }
 
 // Given a list of keys, access nested data inside any combination of
@@ -1284,7 +1245,7 @@ invert_data :: proc(data: any) -> any {
 		s = FALSEY
 	}
 
-	return runtime.new_clone(s)^
+	return runtime.new_clone(s, allocator = context.temp_allocator)^
 }
 
 /*
@@ -1293,49 +1254,46 @@ invert_data :: proc(data: any) -> any {
 render :: proc(
 	template: string,
 	data: any,
-	partials: any = map[string]string {},
+	partials: any = map[string]string {}
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = data
 	template.partials = partials
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_in_layout :: proc(
 	template: string,
 	data: any,
 	layout: string,
-	partials: any = map[string]string {},
+	partials: any = map[string]string {}
 ) -> (s: string, err: Render_Error) {
-	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	defer(free_all(context.temp_allocator))
+
+	lexer := lexer_make()
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = data
 	template.partials = partials
 	template.layout = layout
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_in_layout_file :: proc(
@@ -1344,27 +1302,26 @@ render_in_layout_file :: proc(
 	layout_filename: string,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Read layout file.
-	layout, _ := os.read_entire_file_from_filename(layout_filename)
-	defer delete(layout)
+	layout, _ := os.read_entire_file_from_filename(layout_filename, context.temp_allocator)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
-	template.data = data
-	template.partials = partials
-	template.layout = string(layout)
+	tmpl := template_make(lexer)
+	tmpl.lexer = lexer
+	tmpl.data = data
+	tmpl.partials = partials
+	tmpl.layout = string(layout)
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(tmpl) or_return
+	return strings.clone(s), nil
 }
 
 render_from_filename :: proc(
@@ -1372,26 +1329,25 @@ render_from_filename :: proc(
 	data: any,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Read template file.
-	src, _ := os.read_entire_file_from_filename(filename)
-	defer delete(src)
+	src, _ := os.read_entire_file_from_filename(filename, context.temp_allocator)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
+	template := template_make(lexer)
 	template.lexer = lexer
 	template.data = data
 	template.partials = partials
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_from_filename_in_layout :: proc(
@@ -1400,30 +1356,28 @@ render_from_filename_in_layout :: proc(
 	layout: string,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Read template file and trim the trailing newline.
-	src, _ := os.read_entire_file_from_filename(filename)
+	src, _ := os.read_entire_file_from_filename(filename, context.temp_allocator)
 	if rune(src[len(src)-1]) == '\n' {
 		src = src[0:len(src)-1]
 	}
-	defer delete(src)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = data
 	template.partials = partials
 	template.layout = layout
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_from_filename_in_layout_file :: proc(
@@ -1432,63 +1386,58 @@ render_from_filename_in_layout_file :: proc(
 	layout_filename: string,
 	partials: any = map[string]string {},
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Read template file and trim the trailing newline.
-	src, _ := os.read_entire_file_from_filename(filename)
+	src, _ := os.read_entire_file_from_filename(filename, context.temp_allocator)
 	if rune(src[len(src)-1]) == '\n' {
 		src = src[0:len(src)-1]
 	}
-	defer delete(src)
 
 	// Read layout file.
-	layout, _ := os.read_entire_file_from_filename(layout_filename)
-	defer delete(layout)
+	layout, _ := os.read_entire_file_from_filename(layout_filename, context.temp_allocator)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = data
 	template.partials = partials
 	template.layout = string(layout)
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_with_json :: proc(
 	template: string,
 	json_filename: string,
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Load JSON.
-	json_src, _ := os.read_entire_file_from_filename(json_filename)
-	defer delete(json_src)
-	json_data := json.parse(json_src) or_return
-	defer json.destroy_value(json_data)
+	json_src, _ := os.read_entire_file_from_filename(json_filename, context.temp_allocator)
+	json_data := json.parse(json_src, allocator = context.temp_allocator) or_return
+	// defer json.destroy_value(json_data)
 	json_root := json_data.(json.Object)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = json_root["data"]
 	template.partials = json_root["partials"]
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_with_json_in_layout :: proc(
@@ -1496,30 +1445,27 @@ render_with_json_in_layout :: proc(
 	json_filename: string,
 	layout: string,
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Load JSON.
-	json_src, _ := os.read_entire_file_from_filename(json_filename)
-	defer delete(json_src)
-	json_data := json.parse(json_src) or_return
-	defer json.destroy_value(json_data)
+	json_src, _ := os.read_entire_file_from_filename(json_filename, context.temp_allocator)
+	json_data := json.parse(json_src, allocator = context.temp_allocator) or_return
 	json_root := json_data.(json.Object)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = json_root["data"]
 	template.partials = json_root["partials"]
 	template.layout = layout
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_with_json_in_layout_file :: proc(
@@ -1527,67 +1473,60 @@ render_with_json_in_layout_file :: proc(
 	json_filename: string,
 	layout_filename: string,
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Read layout file.
-	layout, _ := os.read_entire_file_from_filename(layout_filename)
-	defer delete(layout)
+	layout, _ := os.read_entire_file_from_filename(layout_filename, context.temp_allocator)
 
 	// Load JSON.
-	json_src, _ := os.read_entire_file_from_filename(json_filename)
-	defer delete(json_src)
-	json_data := json.parse(json_src) or_return
-	defer json.destroy_value(json_data)
+	json_src, _ := os.read_entire_file_from_filename(json_filename, context.temp_allocator)
+	json_data := json.parse(json_src, allocator = context.temp_allocator) or_return
 	json_root := json_data.(json.Object)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = json_root["data"]
 	template.partials = json_root["partials"]
 	template.layout = string(layout)
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_from_filename_with_json :: proc(
 	filename: string,
 	json_filename: string,
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Read template file.
-	src, _ := os.read_entire_file_from_filename(filename)
-	defer delete(src)
+	src, _ := os.read_entire_file_from_filename(filename, context.temp_allocator)
 
 	// Load JSON.
-	json_src, _ := os.read_entire_file_from_filename(json_filename)
-	defer delete(json_src)
+	json_src, _ := os.read_entire_file_from_filename(json_filename, context.temp_allocator)
 	json_data := json.parse(json_src) or_return
 	defer json.destroy_value(json_data)
 	json_root := json_data.(json.Object)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = json_root["data"]
 	template.partials = json_root["partials"]
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_from_filename_with_json_in_layout :: proc(
@@ -1595,37 +1534,33 @@ render_from_filename_with_json_in_layout :: proc(
 	json_filename: string,
 	layout: string,
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Read template file and trim the trailing newline.
-	src, _ := os.read_entire_file_from_filename(filename)
+	src, _ := os.read_entire_file_from_filename(filename, context.temp_allocator)
 	if rune(src[len(src)-1]) == '\n' {
 		src = src[0:len(src)-1]
 	}
-	defer delete(src)
 
 	// Load JSON.
-	json_src, _ := os.read_entire_file_from_filename(json_filename)
-	defer delete(json_src)
-	json_data := json.parse(json_src) or_return
-	defer json.destroy_value(json_data)
+	json_src, _ := os.read_entire_file_from_filename(json_filename, context.temp_allocator)
+	json_data := json.parse(json_src, allocator = context.temp_allocator) or_return
 	json_root := json_data.(json.Object)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = json_root["data"]
 	template.partials = json_root["partials"]
 	template.layout = layout
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 render_from_filename_with_json_in_layout_file :: proc(
@@ -1633,41 +1568,36 @@ render_from_filename_with_json_in_layout_file :: proc(
 	json_filename: string,
 	layout_filename: string,
 ) -> (s: string, err: Render_Error) {
+	defer(free_all(context.temp_allocator))
+
 	// Read template file and trim the trailing newline.
-	src, _ := os.read_entire_file_from_filename(filename)
+	src, _ := os.read_entire_file_from_filename(filename, context.temp_allocator)
 	if rune(src[len(src)-1]) == '\n' {
 		src = src[0:len(src)-1]
 	}
-	defer delete(src)
 
 	// Read layout file.
-	layout, _ := os.read_entire_file_from_filename(layout_filename)
-	defer delete(layout)
+	layout, _ := os.read_entire_file_from_filename(layout_filename, context.temp_allocator)
 
 	// Load JSON.
-	json_src, _ := os.read_entire_file_from_filename(json_filename)
-	defer delete(json_src)
-	json_data := json.parse(json_src) or_return
-	defer json.destroy_value(json_data)
+	json_src, _ := os.read_entire_file_from_filename(json_filename, context.temp_allocator)
+	json_data := json.parse(json_src, allocator = context.temp_allocator) or_return
 	json_root := json_data.(json.Object)
 
 	// Parse template.
-	lexer: Lexer
-	defer lexer_delete(&lexer)
+	lexer := lexer_make()
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(&lexer) or_return
+	lexer_parse(lexer) or_return
 
 	// Render template.
-	template: Template
-	defer template_delete(&template)
-	template.lexer = lexer
+	template := template_make(lexer)
 	template.data = json_root["data"]
 	template.partials = json_root["partials"]
 	template.layout = string(layout)
 
-	s = template_render(&template) or_return
-	return s, nil
+	s = template_render(template) or_return
+	return strings.clone(s), nil
 }
 
 error :: proc(msg: string, args: ..any) -> ! {
@@ -1708,6 +1638,24 @@ _main :: proc(
 	}
 
 	return output, nil
+}
+
+/*
+	Setup global vars.
+*/
+@(init)
+init :: proc() {
+	// Returns true if the value is one of the "falsey" values
+	// for a context.
+	_falsey_context[FALSEY] = true
+	_falsey_context["null"] = true
+	_falsey_context[""] = true
+
+	// Returns true if the value is one of the "falsey" values
+	// for a context.
+	_whitespace[' '] = true
+	_whitespace['\t'] = true
+	_whitespace['\r'] = true
 }
 
 main :: proc() {
