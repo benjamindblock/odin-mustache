@@ -138,17 +138,6 @@ Data_Type :: enum {
 	Null,
 }
 
-// 1. A map from string => JSON_Data
-// 2. A list of JSON_Data
-// 3. A value of some kind (string, int, etc.)
-JSON_Map :: distinct map[string]JSON_Data
-JSON_List :: distinct [dynamic]JSON_Data
-JSON_Data :: union {
-	JSON_Map,
-	JSON_List,
-	string,
-}
-
 // Returns true if the value is one of the "falsey" values
 // for a context.
 @(private)
@@ -435,18 +424,6 @@ lexer_make :: proc() -> ^Lexer {
 	l.tokens = make([dynamic]Token, 0, context.temp_allocator)
 	l.tag_stack = make([dynamic]rune, 0, context.temp_allocator)
 	return l
-}
-
-template_make :: proc(l: ^Lexer) -> ^Template {
-	t := new(Template, context.temp_allocator)
-	t.lexer = l
-	t.context_stack = make([dynamic]Context_Stack_Entry, 0, context.temp_allocator)
-	return t
-}
-
-lexer_delete :: proc(l: ^Lexer) {
-	delete(l.tag_stack)
-	delete(l.tokens)
 }
 
 lexer_peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
@@ -753,9 +730,12 @@ lexer_token_is_standalone_partial :: proc(l: ^Lexer, token: Token) -> bool {
 	TEMPLATE-RELATED PROCEDURES
 */
 
-// template_delete :: proc(t: ^Template) {
-// 	delete(t.context_stack)
-// }
+template_make :: proc(l: ^Lexer) -> ^Template {
+	t := new(Template, context.temp_allocator)
+	t.lexer = l
+	t.context_stack = make([dynamic]Context_Stack_Entry, 0, context.temp_allocator)
+	return t
+}
 
 // Sections can have false-y values in their corresponding data. When this
 // is the case, the section should not be rendered. Example:
@@ -1160,34 +1140,6 @@ data_len :: proc(obj: any) -> (l: int) {
 	return l
 }
 
-load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
-	switch _val in val {
-	case bool, string:
-		v := fmt.tprintf("%v", _val)
-		loaded = v
-	case i64, f64:
-		str := fmt.tprintf("%.2f", val)
-		decimal_str := trim_decimal_string(str, allocator = context.temp_allocator)
-		loaded = decimal_str
-	case json.Object:
-		data := make(JSON_Map, allocator = context.temp_allocator)
-		for k, v in _val {
-			new_k := fmt.tprintf("%v", k)
-			data[new_k] = load_json(v)
-		}
-		loaded = data
-	case json.Array:
-		data := make(JSON_List, allocator = context.temp_allocator)
-		for v in _val {
-			append(&data, load_json(v))
-		}
-		loaded = data
-	case json.Null:
-	}
-
-	return loaded
-}
-
 // Given a list of keys, access nested data inside any combination of
 // maps, structs, and lists.
 dig :: proc(d: any, keys: []string) -> any {
@@ -1308,7 +1260,6 @@ render :: proc(
 
 	// Parse template.
 	lexer := lexer_make()
-	defer(lexer_delete(lexer))
 	lexer.src = template
 	lexer.delim = CORE_DEF
 	lexer_parse(lexer) or_return

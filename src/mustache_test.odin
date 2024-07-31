@@ -29,6 +29,45 @@ Test_Data :: union {
 	string,
 }
 
+// 1. A map from string => JSON_Data
+// 2. A list of JSON_Data
+// 3. A value of some kind (string, int, etc.)
+JSON_Map :: distinct map[string]JSON_Data
+JSON_List :: distinct [dynamic]JSON_Data
+JSON_Data :: union {
+	JSON_Map,
+	JSON_List,
+	string,
+}
+
+load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
+	switch _val in val {
+	case bool, string:
+		v := fmt.tprintf("%v", _val)
+		loaded = v
+	case i64, f64:
+		str := fmt.tprintf("%.2f", val)
+		decimal_str := trim_decimal_string(str, allocator = context.temp_allocator)
+		loaded = decimal_str
+	case json.Object:
+		data := make(JSON_Map, allocator = context.temp_allocator)
+		for k, v in _val {
+			new_k := fmt.tprintf("%v", k)
+			data[new_k] = load_json(v)
+		}
+		loaded = data
+	case json.Array:
+		data := make(JSON_List, allocator = context.temp_allocator)
+		for v in _val {
+			append(&data, load_json(v))
+		}
+		loaded = data
+	case json.Null:
+	}
+
+	return loaded
+}
+
 load_spec :: proc(filename: string) -> (json.Value) {
 	data, ok := os.read_entire_file_from_filename(filename, context.temp_allocator)
 	if !ok {
