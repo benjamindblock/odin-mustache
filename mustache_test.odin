@@ -1,3 +1,5 @@
+#+feature dynamic-literals
+
 package mustache
 
 import "base:runtime"
@@ -89,18 +91,20 @@ assert :: proc(
 	t: ^testing.T,
 	actual: bool,
 	msg: string,
+	exp := #caller_expression(actual),
 	loc := #caller_location,
 ) {
-	testing.expect(t, actual, msg, loc)
+	testing.expect(t, actual, msg, exp, loc)
 }
 
 assert_not :: proc(
 	t: ^testing.T,
 	actual: bool,
 	msg: string,
+	exp := #caller_expression(actual),
 	loc := #caller_location,
 ) {
-	testing.expect(t, !actual, msg, loc)
+	testing.expect(t, !actual, msg, exp, loc)
 }
 
 assert_mustache :: proc(
