@@ -1101,6 +1101,7 @@ template_render :: proc(tmpl: ^Template) -> (output: string, err: Render_Error) 
 		// The Layout template will have no partials or layouts.
 		// layout_template: Template
 		layout_template := template_make(layout_lexer)
+		layout_template.data = tmpl.data
 
 		// TODO: Could we directly index the special {{content}} tag so that
 		// we don't need to search it here by iterating and just get it?

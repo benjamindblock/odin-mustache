@@ -154,6 +154,22 @@ test_render_in_layout :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_render_in_layout_with_data_for_layout :: proc(t: ^testing.T) {
+	template := "Hello"
+
+	data := make(Test_Map, 1, context.temp_allocator)
+	data["x"] = 42
+
+	layout := "\n{{x}}\n{{content}}\n"
+
+	exp_output := "\n42\nHello\n"
+	output, _ := render_in_layout(template, data, layout)
+	testing.expect_value(t, output, exp_output)
+
+	delete(output)
+}
+
+@(test)
 test_render_in_layout_file :: proc(t: ^testing.T) {
 	template := "Hello, {{name}}."
 	data := make(Test_Map, 1, context.temp_allocator)
