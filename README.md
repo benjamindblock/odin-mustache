@@ -69,14 +69,19 @@ output, err := render(input, data)
 ## Layouts
 `odin-mustache` supports rendering templates with layouts.
 
-A layout is a regular template with one restriction: **layout files can only have a single `{{content}}` tag.**
+A layout is a regular template with a special function. It accepts **a `{{content}}` tag**. This is where the output of a child template will be inserted. Layouts have access to the same data provided to the regular template.
 
 Layouts can render content in both `{{normal}}` and `{{{literal}}}` tags.
 
+This is helpful for rendering scenarios like websites where the same elements (`<head>`, `<footer>`, etc.) are shared across all pages, each of which has their own page-specific template.
+
 ```
 <html>
-  <h1>My Website</h1>
-  <body>{{{content}}}</body>
+  {{{head}}
+  <body>
+    {{{content}}}
+  </body>
+  {{{footer}}
 </html>
 ```
 

@@ -158,7 +158,7 @@ test_render_in_layout_with_data_for_layout :: proc(t: ^testing.T) {
 	template := "Hello"
 
 	data := make(Test_Map, 1, context.temp_allocator)
-	data["x"] = 42
+	data["x"] = "42"
 
 	layout := "\n{{x}}\n{{content}}\n"
 
