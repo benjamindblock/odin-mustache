@@ -29,17 +29,17 @@ Examples:
 ```
 
 ### Odin Usage
-#### 1. `render(template: string, data: any, partials: any)`
+#### 1. `render(template: string, data: any, partials: any, allocator := context.allocator)`
 
 Renders a template, provided as a `string`. `data` and `partials` should be *either* a `map[string]...` or a `struct`.
 
 All `map` arguments passed **must** be keyed with `string` type data. When parsing a Mustache template, the text inside a tag (eg. `name` inside `{{name}}`) will be parsed as a `string`.
 
-#### 2. `render_from_filename(filename: string, data: any, partials: any)`
+#### 2. `render_from_filename(filename: string, data: any, partials: any, allocator := context.allocator)`
 
 Renders a template stored in a text file using `data` and `partials` provided.
 
-#### 3. `render_with_json(template: string, json_filename: string)`
+#### 3. `render_with_json(template: string, json_filename: string, allocator := context.allocator)`
 
 Renders a template `string` using data and partials stored inside a JSON file. `odin-mustache` will handle loading the JSON into a usable format for Mustache to work with.
 
@@ -49,7 +49,7 @@ Renders a template `string` using data and partials stored inside a JSON file. `
 "partials":  [optional]
 ```
 
-#### 4. `render_from_filename_with_json(filename: string, json_filename: string)`
+#### 4. `render_from_filename_with_json(filename: string, json_filename: string, allocator := context.allocator)`
 
 Renders a template stored in a text file using data and partials stored inside a JSON file. `odin-mustache` will handle loading the JSON into a usable format for Mustache to work with.
 
@@ -59,7 +59,7 @@ input := "Hello, {{name}}!"
 data: map[string]string = {
     "name" = "St. Charles",
 }
-output, err := render(input, data)
+output, err := render(input, data, context.temp_allocator)
 // => "Hello, St. Charles!"
 ```
 
@@ -98,14 +98,14 @@ Examples:
 To render a layout in Odin, all four of the above render procedures have `in_layout` and `in_layout_file` variations. These methods will insert the rendered content of a template within the given layout. This is convenient for rendering HTML views inside a larger layout, amongst other use-cases.
 
 The full list of corresponding methods is:
-- `render_in_layout(template: string, data: any, layout: string, partials: any)`
-- `render_in_layout_file(template: string, data: any, layout_filename: string, partials: any)`
-- `render_from_filename_in_layout(filename: string, data: any, layout: string, partials: any)`
-- `render_from_filename_in_layout_file(filename: string, data: any, layout_filename: string, partials: any)`
-- `render_with_json_in_layout(template: string, json_filename: string, layout: string)`
-- `render_with_json_in_layout_file(template: string, json_filename: string, layout_filename: string)`
-- `render_from_filename_with_json_in_layout(filename: string, json_filename: string, layout: string)`
-- `render_from_filename_with_json_in_layout_file(filename: string, json_filename: string, layout_filename: string)`
+- `render_in_layout(template: string, data: any, layout: string, partials: any, allocator := context.allocator)`
+- `render_in_layout_file(template: string, data: any, layout_filename: string, partials: any, allocator := context.allocator)`
+- `render_from_filename_in_layout(filename: string, data: any, layout: string, partials: any, allocator := context.allocator)`
+- `render_from_filename_in_layout_file(filename: string, data: any, layout_filename: string, partials: any, allocator := context.allocator)`
+- `render_with_json_in_layout(template: string, json_filename: string, layout: string, allocator := context.allocator)`
+- `render_with_json_in_layout_file(template: string, json_filename: string, layout_filename: string, allocator := context.allocator)`
+- `render_from_filename_with_json_in_layout(filename: string, json_filename: string, layout: string, allocator := context.allocator)`
+- `render_from_filename_with_json_in_layout_file(filename: string, json_filename: string, layout_filename: string, allocator := context.allocator)`
 
 #### Example
 ```odin
@@ -115,7 +115,7 @@ layout := `Above >>
 {{content}}
 << Below`
 
-output, _ := render_in_layout(template, data, layout)
+output, _ := render_in_layout(template, data, layout, allocator := context.temp_allocator)
 fmt.println(output)
 
 // Above >>

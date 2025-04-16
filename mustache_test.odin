@@ -43,23 +43,25 @@ JSON_Data :: union {
 }
 
 load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
+	context.allocator = context.temp_allocator
+
 	switch _val in val {
 	case bool, string:
 		v := fmt.tprintf("%v", _val)
 		loaded = v
 	case i64, f64:
 		str := fmt.tprintf("%.2f", val)
-		decimal_str := trim_decimal_string(str, allocator = context.temp_allocator)
+		decimal_str := trim_decimal_string(str)
 		loaded = decimal_str
 	case json.Object:
-		data := make(JSON_Map, allocator = context.temp_allocator)
+		data := make(JSON_Map)
 		for k, v in _val {
 			new_k := fmt.tprintf("%v", k)
 			data[new_k] = load_json(v)
 		}
 		loaded = data
 	case json.Array:
-		data := make(JSON_List, allocator = context.temp_allocator)
+		data := make(JSON_List)
 		for v in _val {
 			append(&data, load_json(v))
 		}
@@ -71,7 +73,9 @@ load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
 }
 
 load_spec :: proc(filename: string) -> (json.Value) {
-	data, ok := os.read_entire_file_from_filename(filename, context.temp_allocator)
+	context.allocator = context.temp_allocator
+
+	data, ok := os.read_entire_file_from_filename(filename)
 	if !ok {
 		fmt.println("Failed to load the file!")
 		os.exit(1)
@@ -123,9 +127,11 @@ assert_mustache :: proc(
 
 @(test)
 test_render :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
 
-	data := make(Test_Map, 2, context.temp_allocator)
+	data := make(Test_Map, 2)
 	data["x"] = "Vincent"
 	data["y"] = "R2D2"
 
@@ -138,9 +144,11 @@ test_render :: proc(t: ^testing.T) {
 
 @(test)
 test_render_in_layout :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{x}}, nice to meet you. My name is {{y}}."
 
-	data := make(Test_Map, 2, context.temp_allocator)
+	data := make(Test_Map, 2)
 	data["x"] = "Vincent"
 	data["y"] = "R2D2"
 
@@ -155,6 +163,8 @@ test_render_in_layout :: proc(t: ^testing.T) {
 
 @(test)
 test_render_in_layout_with_data_for_layout :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello"
 
 	data := make(Test_Map, 1, context.temp_allocator)
@@ -171,6 +181,8 @@ test_render_in_layout_with_data_for_layout :: proc(t: ^testing.T) {
 
 @(test)
 test_render_in_layout_file :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{name}}."
 	data := make(Test_Map, 1, context.temp_allocator)
 	data["name"] = "Vincent"
@@ -185,6 +197,8 @@ test_render_in_layout_file :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "test/template.txt"
 	data := make(Test_Map, 1, context.temp_allocator)
 	data["name"] = "Vincent"
@@ -198,6 +212,8 @@ test_render_from_filename :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename_in_layout :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "test/template.txt"
 	data := make(Test_Map, 1, context.temp_allocator)
 	data["name"] = "Vincent"
@@ -212,6 +228,8 @@ test_render_from_filename_in_layout :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename_in_layout_file :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "test/template.txt"
 	data := make(Test_Map, 1, context.temp_allocator)
 	data["name"] = "Vincent"
@@ -226,6 +244,8 @@ test_render_from_filename_in_layout_file :: proc(t: ^testing.T) {
 
 @(test)
 test_render_with_json :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{name}}."
 	json := "test/data.json"
 
@@ -238,6 +258,8 @@ test_render_with_json :: proc(t: ^testing.T) {
 
 @(test)
 test_render_with_json_in_layout :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{name}}."
 	json := "test/data.json"
 	layout := "\nAbove.\n{{content}}\nBelow."
@@ -251,6 +273,8 @@ test_render_with_json_in_layout :: proc(t: ^testing.T) {
 
 @(test)
 test_render_with_json_in_layout_file :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{name}}."
 	json := "test/data.json"
 	layout := "test/layout.txt"
@@ -264,6 +288,8 @@ test_render_with_json_in_layout_file :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename_with_json_in_layout :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "test/template.txt"
 	json := "test/data.json"
 	layout := "\nAbove.\n{{content}}\nBelow."
@@ -277,6 +303,8 @@ test_render_from_filename_with_json_in_layout :: proc(t: ^testing.T) {
 
 @(test)
 test_render_from_filename_with_json_in_layout_file :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "test/template.txt"
 	json := "test/data.json"
 	layout := "test/layout.txt"
@@ -290,6 +318,8 @@ test_render_from_filename_with_json_in_layout_file :: proc(t: ^testing.T) {
 
 @(test)
 test_struct :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{name}}. Send an email to {{email}}."
 	data := Test_Struct {"Vincent", "foo@example.com"}
 	exp_output := "Hello, Vincent. Send an email to foo@example.com."
@@ -298,6 +328,8 @@ test_struct :: proc(t: ^testing.T) {
 
 @(test)
 test_struct_union :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{name}}. Send an email to {{email}}."
 	data: Test_Data
 	data = Test_Struct {"Vincent", "foo@example.com"}
@@ -307,6 +339,8 @@ test_struct_union :: proc(t: ^testing.T) {
 
 @(test)
 test_struct_inside_map :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{name}}. Send an email to {{#email}}{{address}}{{/email}}."
 
 	data := make(map[string]Test_Data, 2, context.temp_allocator)
@@ -322,6 +356,8 @@ test_struct_inside_map :: proc(t: ^testing.T) {
 
 @(test)
 test_list :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "{{#names}}{{.}}{{/names}}"
 
 	data := make(map[string][dynamic]string, 1, context.temp_allocator)
@@ -335,6 +371,8 @@ test_list :: proc(t: ^testing.T) {
 
 @(test)
 test_no_interpolation :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {Mustache}!"
 	data := ""
 	exp_output := "Hello, {Mustache}!"
@@ -343,6 +381,8 @@ test_no_interpolation :: proc(t: ^testing.T) {
 
 @(test)
 test_literal_tag :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	template := "Hello, {{{verb1}}}."
 	data := Test_Map {
 		"verb1" = "I like < >",
@@ -355,6 +395,8 @@ test_literal_tag :: proc(t: ^testing.T) {
 
 @(test)
 test_interpolation_spec :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	spec := load_spec(INTERPOLATION_SPEC)
 	defer json.destroy_value(spec)
 
@@ -374,6 +416,8 @@ test_interpolation_spec :: proc(t: ^testing.T) {
 
 @(test)
 test_comments_spec :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	spec := load_spec(COMMENTS_SPEC)
 	defer json.destroy_value(spec)
 
@@ -393,6 +437,8 @@ test_comments_spec :: proc(t: ^testing.T) {
 
 @(test)
 test_sections_spec :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	spec := load_spec(SECTIONS_SPEC)
 	defer json.destroy_value(spec)
 
@@ -412,6 +458,8 @@ test_sections_spec :: proc(t: ^testing.T) {
 
 @(test)
 test_inverted_spec :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	spec := load_spec(INVERTED_SPEC)
 	defer json.destroy_value(spec)
 
@@ -431,6 +479,8 @@ test_inverted_spec :: proc(t: ^testing.T) {
 
 @(test)
 test_partials_spec :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	spec := load_spec(PARTIALS_SPEC)
 	defer json.destroy_value(spec)
 
@@ -483,18 +533,20 @@ test_partials_spec :: proc(t: ^testing.T) {
 
 @(test)
 test_map_get :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	// Get the value in a map with one key.
 	output: any
-	mss := make(map[string]string, allocator = context.temp_allocator)
-	mcs := make(map[cstring]string, allocator = context.temp_allocator)
-	msi := make(map[string]int, allocator = context.temp_allocator)
-	mis := make(map[int]string, allocator = context.temp_allocator)
+	mss := make(map[string]string)
+	mcs := make(map[cstring]string)
+	msi := make(map[string]int)
+	mis := make(map[int]string)
 
-	tm := make(Test_Map, allocator = context.temp_allocator)
-	mtm := make(map[string]Test_Map, allocator = context.temp_allocator)
+	tm := make(Test_Map)
+	mtm := make(map[string]Test_Map)
 
 	u: Test_Data
-	u = make(Test_Map, allocator = context.temp_allocator)
+	u = make(Test_Map)
 
 	// Simple map
 	delete(mss)
@@ -551,6 +603,8 @@ test_map_get :: proc(t: ^testing.T) {
 
 @(test)
 test_struct_get :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	output: any
 
 	data := Test_Struct{"Vincent", "foo@example.com"}
@@ -567,7 +621,7 @@ test_struct_get :: proc(t: ^testing.T) {
 		"String argument that is NOT a Struct returns nil",
 	)
 
-	test_map := make(Test_Map, allocator = context.temp_allocator)
+	test_map := make(Test_Map)
 	test_map["name"] = "Lee"
 	output = struct_get(test_map, "name")
 	testing.expect(
@@ -585,6 +639,8 @@ test_struct_get :: proc(t: ^testing.T) {
 
 @(test)
 test_is_map :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	m := map[string]string{"Vincent" = "Edgar"}
 	assert(t, is_map(m), "Regular map should return true")
 	delete(m)
@@ -627,16 +683,18 @@ test_is_map :: proc(t: ^testing.T) {
 
 @(test)
 test_is_list :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	arr := [1]string{"element1"}
 	assert(t, is_list(arr), "Array should be considered a list")
 	assert(t, is_list(arr[:]), "Slice should be considered a list")
 
-	dyn_arr := make([dynamic]string, 1, 1, allocator = context.temp_allocator)
+	dyn_arr := make([dynamic]string, 1, 1)
 	append(&dyn_arr, "element1")
 	assert(t, is_list(dyn_arr), "Dynamic array should be considered a list")
 
 	u_arr: Test_Data
-	u_arr = make(Test_List, 1, 1, allocator = context.temp_allocator)
+	u_arr = make(Test_List, 1, 1)
 	append(&u_arr.(Test_List), "element1")
 	assert(t, is_list(u_arr), "Dynamic array in a union should be considered a list")
 
@@ -644,7 +702,7 @@ test_is_list :: proc(t: ^testing.T) {
 	assert_not(t, is_list(1), "int should not be considered a list")
 
 	u_map: Test_Data
-	u_map = make(Test_Map, 1, allocator = context.temp_allocator)
+	u_map = make(Test_Map, 1)
 	assert_not(
 		t,
 		is_list(u_map),
@@ -654,6 +712,8 @@ test_is_list :: proc(t: ^testing.T) {
 
 @(test)
 test_is_struct :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	assert(
 		t,
 		is_struct(Test_Struct{"Vincent", "foo@example.com"}),
@@ -669,14 +729,14 @@ test_is_struct :: proc(t: ^testing.T) {
 	)
 
 	data: Test_Data
-	data = make(Test_Map, allocator = context.temp_allocator)
+	data = make(Test_Map)
 	assert_not(
 		t,
 		is_struct(data),
 		"Union with map variant should not be considered a Struct",
 	)
 
-	data = make(Test_List, allocator = context.temp_allocator)
+	data = make(Test_List)
 	append(&data.(Test_List), "foo", "bar", "baz")
 	assert_not(
 		t,
@@ -687,8 +747,10 @@ test_is_struct :: proc(t: ^testing.T) {
 
 @(test)
 test_is_union :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	u: Test_Data
-	u = make(Test_Map, allocator = context.temp_allocator)
+	u = make(Test_Map)
 	assert(
 		t,
 		is_union(u),
@@ -696,21 +758,21 @@ test_is_union :: proc(t: ^testing.T) {
 	)
 
 
-	tm := make(Test_Map, allocator = context.temp_allocator)
+	tm := make(Test_Map)
 	assert_not(
 		t,
 		is_union(tm),
 		"Union member with a type is not a union",
 	)
 
-	tl := make(Test_List, allocator = context.temp_allocator)
+	tl := make(Test_List)
 	assert_not(
 		t,
 		is_union(tl),
 		"Union member with a type is not a union",
 	)
 
-	m := make(map[string]string, allocator = context.temp_allocator)
+	m := make(map[string]string)
 	assert_not(
 		t,
 		is_union(m),
@@ -727,12 +789,14 @@ test_is_union :: proc(t: ^testing.T) {
 
 @(test)
 test_data_len :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	data: any
 
-	data = make([dynamic]string, allocator = context.temp_allocator)
+	data = make([dynamic]string)
 	testing.expect_value(t, data_len(data), 0)
 
-	data = make([dynamic]string, allocator = context.temp_allocator)
+	data = make([dynamic]string)
 	append(&data.([dynamic]string), "Vincent")
 	testing.expect_value(t, data_len(data), 1)
 
@@ -746,25 +810,27 @@ test_data_len :: proc(t: ^testing.T) {
 	u = Test_Struct{"Vincent", "foo@example.com"}
 	testing.expect_value(t, data_len(u), 2)
 
-	u = make(Test_Map, allocator = context.temp_allocator)
+	u = make(Test_Map)
 	(&u.(Test_Map))["name"] = "St. Charles"
 	testing.expect_value(t, data_len(u), 1)
 }
 
 @(test)
 test_has_key :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	data: any
 
 	data = Test_Struct{"St. Charles", "foo@example.com"}
 	assert(t, has_key(data, "name"), "Should return true if stuct has field")
 
-	data = make(map[string]int, allocator = context.temp_allocator)
+	data = make(map[string]int)
 	(&data.(map[string]int))["A1"] = 1
 	assert(t, has_key(data, "A1"), "Should return true if map has key")
 	assert_not(t, has_key(data, "B2"), "Should return false if map does not have key")
 
 	u: Test_Data
-	u = make(Test_Map, allocator = context.temp_allocator)
+	u = make(Test_Map)
 	(&u.(Test_Map))["name"] = "St. Charles"
 	assert(t, has_key(u, "name"), "Should return true if union-map has key")
 	assert_not(t, has_key(u, "email"), "Should return false if union-map does not have key")
@@ -776,6 +842,8 @@ test_has_key :: proc(t: ^testing.T) {
 
 @(test)
 test_list_at :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	arr := [2]string{"foo", "bar"}
 	testing.expect_value(t, list_at(arr, 0).(string), "foo")
 	testing.expect_value(t, list_at(arr, 1).(string), "bar")
@@ -783,15 +851,17 @@ test_list_at :: proc(t: ^testing.T) {
 	testing.expect_value(t, list_at(arr[:], 0).(string), "foo")
 	testing.expect_value(t, list_at(arr[:], 1).(string), "bar")
 
-	dyn := slice.clone_to_dynamic(arr[:], allocator = context.temp_allocator)
+	dyn := slice.clone_to_dynamic(arr[:])
 	testing.expect_value(t, list_at(dyn, 0).(string), "foo")
 	testing.expect_value(t, list_at(dyn, 1).(string), "bar")
 }
 
 @(test)
 test_dig :: proc(t: ^testing.T) {
+	context.allocator = context.temp_allocator
+
 	output: any
-	keys := make([dynamic]string, allocator = context.temp_allocator)
+	keys := make([dynamic]string)
 
 	// Pull out a struct value
 	d1: any
@@ -803,7 +873,7 @@ test_dig :: proc(t: ^testing.T) {
 
 	// Pull out a map value
 	d2: any
-	d2 = make(map[string]string, allocator = context.temp_allocator)
+	d2 = make(map[string]string)
 	(&d2.(map[string]string))["name"] = "Edgar"
 	keys = {"name"}
 	output = dig(d2, keys[:])
@@ -812,8 +882,8 @@ test_dig :: proc(t: ^testing.T) {
 
 	// Pull out a nested map value
 	d3: any
-	d3 = make(map[string]map[string]string, allocator = context.temp_allocator)
-	c1 := make(map[string]string, allocator = context.temp_allocator)
+	d3 = make(map[string]map[string]string)
+	c1 := make(map[string]string)
 	c1["name"] = "Kurt"
 	c1["email"] = "test@example.com"
 	(&d3.(map[string]map[string]string))["customer1"] = c1
@@ -823,8 +893,8 @@ test_dig :: proc(t: ^testing.T) {
 	delete(keys)
 
 	// Pull out a nested map
-	d4 := make(map[string]map[string]string, allocator = context.temp_allocator)
-	c2 := make(map[string]string, allocator = context.temp_allocator)
+	d4 := make(map[string]map[string]string)
+	c2 := make(map[string]string)
 	c2["name"] = "Kurt"
 	c2["email"] = "test@example.com"
 	d4["customer1"] = c2
@@ -846,7 +916,7 @@ test_dig :: proc(t: ^testing.T) {
 
 	// Pull out a struct inside a map
 	d6: any
-	d6 = make(map[string]Test_Struct, allocator = context.temp_allocator)
+	d6 = make(map[string]Test_Struct)
 	c3 := Test_Struct{"Vincent", "foo@example.com"}
 	(&d6.(map[string]Test_Struct))["customer1"] = c3
 	keys = {"customer1", "email"}
@@ -883,7 +953,7 @@ test_dig :: proc(t: ^testing.T) {
 	delete(keys)
 
 	// Pull out a nil struct value
-	d11 := make(map[string]string, allocator = context.temp_allocator)
+	d11 := make(map[string]string)
 	d11["name"] = "Vincent"
 	keys = {"XXX"}
 	output = dig(d11, keys[:])
