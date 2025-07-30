@@ -38,40 +38,40 @@ Lexer_Error :: union {
 Unbalanced_Tags :: struct {}
 
 Token_Delimiters :: struct {
-	otag: string,
-	ctag: string,
-	otag_lit: string,
-	ctag_lit: string,
-	otag_section_open: string,
+	otag:               string,
+	ctag:               string,
+	otag_lit:           string,
+	ctag_lit:           string,
+	otag_section_open:  string,
 	otag_section_close: string,
-	otag_literal: string,
-	otag_comment: string,
-	otag_inverted: string,
-	otag_partial: string,
-	otag_delim: string,
-	ctag_delim: string,
+	otag_literal:       string,
+	otag_comment:       string,
+	otag_inverted:      string,
+	otag_partial:       string,
+	otag_delim:         string,
+	ctag_delim:         string,
 }
 
 CORE_DEF :: Token_Delimiters {
-	otag = "{{",
-	ctag = "}}",
-	otag_lit = "{{{",
-	ctag_lit = "}}}",
-	otag_section_open = "{{#",
+	otag               = "{{",
+	ctag               = "}}",
+	otag_lit           = "{{{",
+	ctag_lit           = "}}}",
+	otag_section_open  = "{{#",
 	otag_section_close = "{{/",
-	otag_literal = "{{&",
-	otag_comment = "{{!",
-	otag_inverted = "{{^",
-	otag_partial = "{{>",
-	otag_delim = "{{=",
-	ctag_delim = "=}}",
+	otag_literal       = "{{&",
+	otag_comment       = "{{!",
+	otag_inverted      = "{{^",
+	otag_partial       = "{{>",
+	otag_delim         = "{{=",
+	ctag_delim         = "=}}",
 }
 
 Token :: struct {
-	type: Token_Type,
-	value: string,
-	pos: Pos,
-	iters: int,
+	type:    Token_Type,
+	value:   string,
+	pos:     Pos,
+	iters:   int,
 	start_i: int,
 }
 
@@ -92,19 +92,19 @@ Token_Type :: enum {
 
 Pos :: struct {
 	start: int,
-	end: int,
-	line: int,
+	end:   int,
+	line:  int,
 }
 
 Lexer :: struct {
-	src: string,
-	cursor: int,
-	line: int,
-	tokens: [dynamic]Token,
-	cur_token_type: Token_Type,
+	src:                 string,
+	cursor:              int,
+	line:                int,
+	tokens:              [dynamic]Token,
+	cur_token_type:      Token_Type,
 	cur_token_start_pos: int,
-	tag_stack: [dynamic]rune,
-	delim: Token_Delimiters,
+	tag_stack:           [dynamic]rune,
+	delim:               Token_Delimiters,
 }
 
 Data_Error :: enum {
@@ -118,15 +118,15 @@ Template_Error :: union {
 }
 
 Template :: struct {
-	lexer: ^Lexer,
-	data: any,
-	partials: any,
+	lexer:         ^Lexer,
+	data:          any,
+	partials:      any,
 	context_stack: [dynamic]Context_Stack_Entry,
-	layout: string,
+	layout:        string,
 }
 
 Context_Stack_Entry :: struct {
-	data: any,
+	data:  any,
 	label: string,
 }
 
@@ -154,13 +154,13 @@ _whitespace := make(map[rune]bool)
 */
 
 trim_decimal_string :: proc(s: string, allocator := context.allocator) -> string {
-	if len(s) == 0 || s[len(s)-1] != '0' {
+	if len(s) == 0 || s[len(s) - 1] != '0' {
 		return strings.clone(s[:], allocator)
 	}
 
 	// We have at least one trailing zero. Search backwards and find the rest.
-	trailing_start_idx := len(s)-1
-	for i := len(s) - 2; i >= 0 ; i -= 1 {
+	trailing_start_idx := len(s) - 1
+	for i := len(s) - 2; i >= 0; i -= 1 {
 		switch s[i] {
 		case '0':
 			if trailing_start_idx == i + 1 {
@@ -235,7 +235,7 @@ map_get :: proc(v: any, map_key: string) -> (dug: any, err: Template_Error) {
 	map_cap := uintptr(runtime.map_cap(m^))
 	ks, vs, hs, _, _ := runtime.map_kvh_data_dynamic(m^, map_info)
 
-	for bucket_index in 0..<map_cap {
+	for bucket_index in 0 ..< map_cap {
 		runtime.map_hash_is_valid(hs[bucket_index]) or_continue
 
 		// Accessing the map key.
@@ -384,7 +384,7 @@ map_has_key :: proc(v: any, map_key: string) -> (has: bool) {
 	map_cap := uintptr(runtime.map_cap(m^))
 	ks, _, hs, _, _ := runtime.map_kvh_data_dynamic(m^, map_info)
 
-	for bucket_index in 0..<map_cap {
+	for bucket_index in 0 ..< map_cap {
 		runtime.map_hash_is_valid(hs[bucket_index]) or_continue
 
 		// Accessing string type in key
@@ -426,7 +426,7 @@ lexer_make :: proc(allocator := context.allocator) -> ^Lexer {
 	return l
 }
 
-lexer_peek :: proc(l: ^Lexer, s: string, offset := 0) -> (bool) {
+lexer_peek :: proc(l: ^Lexer, s: string, offset := 0) -> bool {
 	peek_i: int
 	peeked: rune
 
@@ -479,7 +479,13 @@ lexer_start :: proc(l: ^Lexer, new_type: Token_Type) {
 		switch cur_type {
 		case .Newline:
 			l.cur_token_start_pos = l.cursor + len("\n")
-		case .Tag, .Section_Open_Inverted, .Tag_Literal, .Section_Close, .Section_Open, .Comment, .Partial:
+		case .Tag,
+		     .Section_Open_Inverted,
+		     .Tag_Literal,
+		     .Section_Close,
+		     .Section_Open,
+		     .Comment,
+		     .Partial:
 			l.cur_token_start_pos = l.cursor + len(l.delim.ctag)
 		case .Tag_Literal_Triple:
 			l.cur_token_start_pos = l.cursor + len(l.delim.ctag_lit)
@@ -498,21 +504,24 @@ lexer_append :: proc(l: ^Lexer, allocator := context.allocator) {
 		lexer_append_text(l)
 	case .Newline:
 		lexer_append_newline(l)
-	case .Tag, .Tag_Literal, .Tag_Literal_Triple, .Comment, .Partial, .Section_Open, .Section_Open_Inverted, .Section_Close:
+	case .Tag,
+	     .Tag_Literal,
+	     .Tag_Literal_Triple,
+	     .Comment,
+	     .Partial,
+	     .Section_Open,
+	     .Section_Open_Inverted,
+	     .Section_Close:
 		lexer_append_tag(l, l.cur_token_type, allocator)
 	case .EOF, .Skip:
 	}
 }
 
-lexer_append_tag :: proc(
-	l: ^Lexer,
-	token_type: Token_Type,
-	allocator := context.allocator,
-) {
+lexer_append_tag :: proc(l: ^Lexer, token_type: Token_Type, allocator := context.allocator) {
 	pos := Pos {
-		start=l.cur_token_start_pos,
-		end=l.cursor,
-		line=l.line,
+		start = l.cur_token_start_pos,
+		end   = l.cursor,
+		line  = l.line,
 	}
 
 	if pos.end > pos.start {
@@ -520,84 +529,96 @@ lexer_append_tag :: proc(
 		// mess up our access of the data.
 		token_text := l.src[pos.start:pos.end]
 		token_text, _ = strings.remove_all(token_text, " ", allocator = allocator)
-		token := Token{type=token_type, value=token_text, pos=pos}
+		token := Token {
+			type  = token_type,
+			value = token_text,
+			pos   = pos,
+		}
 		append(&l.tokens, token)
 	}
 }
 
 lexer_append_text :: proc(l: ^Lexer) {
 	pos := Pos {
-		start=l.cur_token_start_pos,
-		end=l.cursor,
-		line=l.line,
+		start = l.cur_token_start_pos,
+		end   = l.cursor,
+		line  = l.line,
 	}
 
 	if pos.end > pos.start {
 		text := l.src[pos.start:pos.end]
-		token := Token{type=.Text, value=text, pos=pos}
+		token := Token {
+			type  = .Text,
+			value = text,
+			pos   = pos,
+		}
 		append(&l.tokens, token)
 	}
 }
 
 lexer_append_newline :: proc(l: ^Lexer) {
 	pos := Pos {
-		start=l.cur_token_start_pos,
-		end=l.cursor + 1,
-		line=l.line,
+		start = l.cur_token_start_pos,
+		end   = l.cursor + 1,
+		line  = l.line,
 	}
 
-	newline := Token{type=.Newline, value="\n", pos=pos}
+	newline := Token {
+		type  = .Newline,
+		value = "\n",
+		pos   = pos,
+	}
 	append(&l.tokens, newline)
 }
 
-lexer_parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
+lexer_parse :: proc(l: ^Lexer, allocator := context.allocator) -> (err: Lexer_Error) {
 	for l.cursor < len(l.src) {
 		ch := rune(l.src[l.cursor])
-		defer { l.cursor += 1 }
+		defer {l.cursor += 1}
 
 		switch {
 		// When we hit a newline (and we are not inside a .Comment, as multi-line
 		// comments are permitted), add the current chunk as a new Token, insert
 		// a special .Newline token, and then begin as a new .Text Token.
 		case ch == '\n' && l.cur_token_type != .Comment:
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Newline)
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Text)
 			l.line += 1
 		case lexer_peek(l, l.delim.otag_lit):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Tag_Literal_Triple)
 		case lexer_peek(l, l.delim.otag_section_open):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Section_Open)
 		case lexer_peek(l, l.delim.otag_section_close):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Section_Close)
 		case lexer_peek(l, l.delim.otag_inverted):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Section_Open_Inverted)
 		case lexer_peek(l, l.delim.otag_partial):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Partial)
 		case lexer_peek(l, l.delim.otag_literal):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Tag_Literal)
 		case lexer_peek(l, l.delim.otag_comment):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Comment)
 		// Be careful with checking for "{{" -- it could be a substring of "{{{"
 		case lexer_peek(l, l.delim.otag) && l.cur_token_type != .Tag_Literal_Triple:
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Tag)
 		case lexer_peek(l, "}") && l.cur_token_type != .Text:
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Text)
 		}
 	}
 
 	// Add the last tag and mark that we hit the end of the file.
-	lexer_append(l)
+	lexer_append(l, allocator = allocator)
 	l.cur_token_type = .EOF
 	return nil
 }
@@ -614,7 +635,13 @@ lexer_token_should_skip :: proc(l: ^Lexer, t: Token) -> (skip: bool) {
 		skip = lexer_should_skip_newline_token(l, t)
 	case .Text:
 		skip = lexer_should_skip_text_token(l, t)
-	case .Tag, .Tag_Literal, .Tag_Literal_Triple, .Partial, .Section_Open, .Section_Close, .Section_Open_Inverted:
+	case .Tag,
+	     .Tag_Literal,
+	     .Tag_Literal_Triple,
+	     .Partial,
+	     .Section_Open,
+	     .Section_Close,
+	     .Section_Open_Inverted:
 		skip = false
 	case .EOF, .Skip, .Comment:
 		skip = true
@@ -670,8 +697,14 @@ lexer_should_skip_newline_token :: proc(l: ^Lexer, token: Token) -> bool {
 			}
 		case .Tag, .Tag_Literal, .Tag_Literal_Triple:
 			return false
-		case .Section_Open, .Section_Close, .Section_Open_Inverted, .Comment,
-				 .Partial, .Newline, .Skip, .EOF:
+		case .Section_Open,
+		     .Section_Close,
+		     .Section_Open_Inverted,
+		     .Comment,
+		     .Partial,
+		     .Newline,
+		     .Skip,
+		     .EOF:
 		}
 	}
 
@@ -751,7 +784,7 @@ template_make :: proc(l: ^Lexer, allocator := context.allocator) -> ^Template {
 //   - Map with at least one key
 //   - List with at least one element
 //   - string NOT in the _falsey_context mapping
-template_token_is_valid :: proc(tmpl: ^Template, token: Token) -> (bool) {
+template_token_is_valid :: proc(tmpl: ^Template, token: Token) -> bool {
 	stack_entry := tmpl.context_stack[0]
 
 	// The root stack is always valid.
@@ -776,7 +809,9 @@ template_string_from_key :: proc(
 	tmpl: ^Template,
 	key: string,
 	allocator := context.allocator,
-) -> (s: string) {
+) -> (
+	s: string,
+) {
 	resolved: any
 
 	if key == "." {
@@ -795,7 +830,7 @@ template_string_from_key :: proc(
 		// Apply "dotted name resolution" if we have parts after the core ID.
 		if len(ids[1:]) > 0 {
 			last := slice.last(ids[:])
-			last_slice := ids[len(ids)-1:]
+			last_slice := ids[len(ids) - 1:]
 			resolved = dig(resolved, ids[1:])
 			if is_map(resolved) || is_struct(resolved) && has_key(resolved, last) {
 				resolved = dig(resolved, last_slice)
@@ -819,7 +854,9 @@ template_get_data_for_stack :: proc(
 	tmpl: ^Template,
 	data_id: string,
 	allocator := context.allocator,
-) -> (data: any) {
+) -> (
+	data: any,
+) {
 	ids := strings.split(data_id, ".", allocator = allocator)
 	defer delete(ids)
 
@@ -829,7 +866,7 @@ template_get_data_for_stack :: proc(
 
 	// If we couldn't resolve against the top of the stack, add from the root.
 	if data == nil {
-		root_stack_entry := tmpl.context_stack[len(tmpl.context_stack)-1]
+		root_stack_entry := tmpl.context_stack[len(tmpl.context_stack) - 1]
 		data = dig(root_stack_entry.data, ids)
 	}
 
@@ -853,20 +890,26 @@ template_add_to_context_stack :: proc(
 	data := template_get_data_for_stack(tmpl, data_id, allocator)
 
 	if t.type == .Section_Open_Inverted {
-		stack_entry := Context_Stack_Entry{
-			data=invert_data(data, allocator),
-			label=data_id,
+		stack_entry := Context_Stack_Entry {
+			data  = invert_data(data, allocator),
+			label = data_id,
 		}
 		inject_at(&tmpl.context_stack, 0, stack_entry)
 	} else {
 		switch data_type(data) {
 		case .Map, .Struct, .Value:
-			stack_entry := Context_Stack_Entry{data=data, label=data_id}
+			stack_entry := Context_Stack_Entry {
+				data  = data,
+				label = data_id,
+			}
 			inject_at(&tmpl.context_stack, 0, stack_entry)
 		case .List:
 			template_inject_list_into_context_stack(tmpl, data, offset)
 		case .Null:
-			stack_entry := Context_Stack_Entry{data=nil, label=data_id}
+			stack_entry := Context_Stack_Entry {
+				data  = nil,
+				label = data_id,
+			}
 			inject_at(&tmpl.context_stack, 0, stack_entry)
 		}
 	}
@@ -881,7 +924,7 @@ template_inject_list_into_context_stack :: proc(tmpl: ^Template, list: any, offs
 	// Remove the original chunk from the token list if the list is empty.
 	// We treat empty lists as false-y values.
 	if data_len(list) == 0 {
-		for _ in start_chunk..<end_chunk {
+		for _ in start_chunk ..< end_chunk {
 			ordered_remove(&tmpl.lexer.tokens, start_chunk)
 		}
 		return
@@ -899,18 +942,17 @@ template_inject_list_into_context_stack :: proc(tmpl: ^Template, list: any, offs
 	// reverse order of the list, so that the first entry is at the top.
 	for i := section_close.iters; i >= 0; i -= 1 {
 		el := list_at(list, i)
-		stack_entry := Context_Stack_Entry{data=el, label="TEMP LIST"}
+		stack_entry := Context_Stack_Entry {
+			data  = el,
+			label = "TEMP LIST",
+		}
 		inject_at(&tmpl.context_stack, 0, stack_entry)
 	}
 }
 
 // Finds the closing tag with a given value after
 // the given offset.
-template_find_section_close_tag_index :: proc(
-	tmpl: ^Template,
-	label: string,
-	offset: int,
-) -> (int) {
+template_find_section_close_tag_index :: proc(tmpl: ^Template, label: string, offset: int) -> int {
 	for t, i in tmpl.lexer.tokens[offset:] {
 		if t.type == .Section_Close && t.value == label {
 			return i + offset
@@ -940,8 +982,7 @@ token_content :: proc(tmpl: ^Template, t: Token, allocator := context.allocator)
 		s = template_string_from_key(tmpl, t.value, allocator)
 	case .Newline:
 		s = "\n"
-	case .Section_Open, .Section_Open_Inverted, .Section_Close,
-		 .Comment, .Skip, .EOF, .Partial:
+	case .Section_Open, .Section_Open_Inverted, .Section_Close, .Comment, .Skip, .EOF, .Partial:
 	}
 
 	return s
@@ -951,8 +992,15 @@ token_is_tag :: proc(t: Token) -> bool {
 	switch t.type {
 	case .Tag, .Tag_Literal, .Tag_Literal_Triple:
 		return true
-	case .Text, .Newline, .Section_Open, .Section_Open_Inverted, .Section_Close,
-		 .Comment, .Skip, .EOF, .Partial:
+	case .Text,
+	     .Newline,
+	     .Section_Open,
+	     .Section_Open_Inverted,
+	     .Section_Close,
+	     .Comment,
+	     .Skip,
+	     .EOF,
+	     .Partial:
 		return false
 	}
 
@@ -966,7 +1014,9 @@ template_insert_partial :: proc(
 	token: Token,
 	offset: int,
 	allocator := context.allocator,
-) -> (err: Lexer_Error) {
+) -> (
+	err: Lexer_Error,
+) {
 	partial_name := token.value
 	partial_content := dig(tmpl.partials, []string{partial_name})
 	partial_str, _ := any_to_string(partial_content)
@@ -975,7 +1025,7 @@ template_insert_partial :: proc(
 	lexer.src = partial_str
 	lexer.line = token.pos.line
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Performs any indentation on the .Partial that we are inserting.
 	//
@@ -984,9 +1034,9 @@ template_insert_partial :: proc(
 	//
 	standalone := lexer_token_is_standalone_partial(tmpl.lexer, token)
 	if offset > 0 && standalone {
-		prev_token := tmpl.lexer.tokens[offset-1]
+		prev_token := tmpl.lexer.tokens[offset - 1]
 		if prev_token.type == .Text && is_text_blank(prev_token.value) {
-			cur_line := lexer.tokens[len(lexer.tokens)-1].pos.line
+			cur_line := lexer.tokens[len(lexer.tokens) - 1].pos.line
 			#reverse for t, i in lexer.tokens {
 				// Do not indent the top line.
 				if cur_line == 0 {
@@ -995,7 +1045,7 @@ template_insert_partial :: proc(
 
 				// When moving back up a line, insert the indentation.
 				if cur_line != t.pos.line {
-					inject_at(&lexer.tokens, i+1, prev_token)
+					inject_at(&lexer.tokens, i + 1, prev_token)
 				}
 
 				cur_line = t.pos.line
@@ -1005,7 +1055,7 @@ template_insert_partial :: proc(
 
 	// Inject tokens from the partial into the primary template.
 	#reverse for t in lexer.tokens {
-		inject_at(&tmpl.lexer.tokens, offset+1, t)
+		inject_at(&tmpl.lexer.tokens, offset + 1, t)
 	}
 
 	return nil
@@ -1018,18 +1068,20 @@ template_insert_content_into_layout :: proc(
 	offset: int,
 	content: string,
 	allocator := context.allocator,
-) -> (err: Lexer_Error) {
+) -> (
+	err: Lexer_Error,
+) {
 	lexer := lexer_make(allocator)
 	lexer.src = content
 	lexer.line = token.pos.line
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Performs indentation on the content.
 	if offset > 0 {
-		prev_token := tmpl.lexer.tokens[offset-1]
+		prev_token := tmpl.lexer.tokens[offset - 1]
 		if prev_token.type == .Text && is_text_blank(prev_token.value) {
-			cur_line := lexer.tokens[len(lexer.tokens)-1].pos.line
+			cur_line := lexer.tokens[len(lexer.tokens) - 1].pos.line
 			#reverse for t, i in lexer.tokens {
 				// Do not indent the top line.
 				if cur_line == 0 {
@@ -1038,7 +1090,7 @@ template_insert_content_into_layout :: proc(
 
 				// When moving back up a line, insert the indentation.
 				if cur_line != t.pos.line {
-					inject_at(&lexer.tokens, i+1, prev_token)
+					inject_at(&lexer.tokens, i + 1, prev_token)
 				}
 
 				cur_line = t.pos.line
@@ -1048,7 +1100,7 @@ template_insert_content_into_layout :: proc(
 
 	// Inject tokens from the partial into the primary template.
 	#reverse for t in lexer.tokens {
-		inject_at(&tmpl.lexer.tokens, offset+1, t)
+		inject_at(&tmpl.lexer.tokens, offset + 1, t)
 	}
 
 	return nil
@@ -1076,7 +1128,7 @@ template_eat_tokens :: proc(
 	// Second pass to render the template.
 	i := 0
 	for i < len(tmpl.lexer.tokens) {
-		defer { i += 1 }
+		defer {i += 1}
 		t := tmpl.lexer.tokens[i]
 
 		switch t.type {
@@ -1106,11 +1158,14 @@ template_eat_tokens :: proc(
 template_render :: proc(
 	tmpl: ^Template,
 	allocator := context.allocator,
-) -> (output: string, err: Render_Error) {
+) -> (
+	output: string,
+	err: Render_Error,
+) {
 	sb := strings.builder_make(allocator)
 
 	template_eat_tokens(tmpl, &sb, allocator)
-	rendered := strings.to_string(sb) 
+	rendered := strings.to_string(sb)
 
 	if tmpl.layout != "" {
 		sbl := strings.builder_make(allocator)
@@ -1119,7 +1174,7 @@ template_render :: proc(
 		layout_lexer := lexer_make(allocator)
 		layout_lexer.src = tmpl.layout
 		layout_lexer.delim = CORE_DEF
-		lexer_parse(layout_lexer) or_return
+		lexer_parse(layout_lexer, allocator = allocator) or_return
 
 		// The Layout template will have no partials or layouts.
 		// layout_template: Template
@@ -1183,7 +1238,7 @@ dig :: proc(d: any, keys: []string) -> any {
 			d = d
 		case .Value:
 			if key == "." {
-				d = fmt.tprintf("%v", d) 
+				d = fmt.tprintf("%v", d)
 			} else {
 				return nil
 			}
@@ -1199,7 +1254,7 @@ any_to_string :: proc(obj: any) -> (s: string, err: Render_Error) {
 	switch data_type(obj) {
 	case .Struct, .Map, .List:
 		fmt.println("Could not convert", obj, "to printable content.")
-		return s, Template_Error {}
+		return s, Template_Error{}
 	case .Value:
 		s = fmt.tprintf("%v", obj)
 	case .Null:
@@ -1278,14 +1333,17 @@ invert_data :: proc(data: any, allocator := context.allocator) -> any {
 render :: proc(
 	template: string,
 	data: any,
-	partials: any = map[string]string {},
+	partials: any = map[string]string{},
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Parse template.
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template
 	template := template_make(lexer, allocator)
@@ -1300,13 +1358,16 @@ render_in_layout :: proc(
 	template: string,
 	data: any,
 	layout: string,
-	partials: any = map[string]string {},
+	partials: any = map[string]string{},
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1322,9 +1383,12 @@ render_in_layout_file :: proc(
 	template: string,
 	data: any,
 	layout_filename: string,
-	partials: any = map[string]string {},
+	partials: any = map[string]string{},
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Read layout file.
 	layout, _ := os.read_entire_file_from_filename(layout_filename, allocator)
 
@@ -1332,7 +1396,7 @@ render_in_layout_file :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template
 	tmpl := template_make(lexer, allocator)
@@ -1348,9 +1412,12 @@ render_in_layout_file :: proc(
 render_from_filename :: proc(
 	filename: string,
 	data: any,
-	partials: any = map[string]string {},
+	partials: any = map[string]string{},
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Read template file.
 	src, _ := os.read_entire_file_from_filename(filename, allocator)
 
@@ -1358,7 +1425,7 @@ render_from_filename :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1374,21 +1441,24 @@ render_from_filename_in_layout :: proc(
 	filename: string,
 	data: any,
 	layout: string,
-	partials: any = map[string]string {},
+	partials: any = map[string]string{},
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 
 	// Read template file and trim the trailing newline.
 	src, _ := os.read_entire_file_from_filename(filename, allocator)
-	if rune(src[len(src)-1]) == '\n' {
-		src = src[0:len(src)-1]
+	if rune(src[len(src) - 1]) == '\n' {
+		src = src[0:len(src) - 1]
 	}
 
 	// Parse template.
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1404,14 +1474,17 @@ render_from_filename_in_layout_file :: proc(
 	filename: string,
 	data: any,
 	layout_filename: string,
-	partials: any = map[string]string {},
+	partials: any = map[string]string{},
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 
 	// Read template file and trim the trailing newline.
 	src, _ := os.read_entire_file_from_filename(filename, allocator)
-	if rune(src[len(src)-1]) == '\n' {
-		src = src[0:len(src)-1]
+	if rune(src[len(src) - 1]) == '\n' {
+		src = src[0:len(src) - 1]
 	}
 
 	// Read layout file.
@@ -1421,7 +1494,7 @@ render_from_filename_in_layout_file :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template
 	template := template_make(lexer, allocator)
@@ -1437,7 +1510,10 @@ render_with_json :: proc(
 	template: string,
 	json_filename: string,
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Load JSON.
 	json_src, _ := os.read_entire_file_from_filename(json_filename, allocator)
 	json_data := json.parse(json_src, allocator = allocator) or_return
@@ -1447,7 +1523,7 @@ render_with_json :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1463,7 +1539,10 @@ render_with_json_in_layout :: proc(
 	json_filename: string,
 	layout: string,
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Load JSON.
 	json_src, _ := os.read_entire_file_from_filename(json_filename, allocator)
 	json_data := json.parse(json_src, allocator = allocator) or_return
@@ -1473,7 +1552,7 @@ render_with_json_in_layout :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1490,7 +1569,10 @@ render_with_json_in_layout_file :: proc(
 	json_filename: string,
 	layout_filename: string,
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Read layout file.
 	layout, _ := os.read_entire_file_from_filename(layout_filename, allocator)
 
@@ -1503,7 +1585,7 @@ render_with_json_in_layout_file :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1519,7 +1601,10 @@ render_from_filename_with_json :: proc(
 	filename: string,
 	json_filename: string,
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Read template file.
 	src, _ := os.read_entire_file_from_filename(filename, allocator)
 
@@ -1533,7 +1618,7 @@ render_from_filename_with_json :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1549,11 +1634,14 @@ render_from_filename_with_json_in_layout :: proc(
 	json_filename: string,
 	layout: string,
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Read template file and trim the trailing newline.
 	src, _ := os.read_entire_file_from_filename(filename, allocator)
-	if rune(src[len(src)-1]) == '\n' {
-		src = src[0:len(src)-1]
+	if rune(src[len(src) - 1]) == '\n' {
+		src = src[0:len(src) - 1]
 	}
 
 	// Load JSON.
@@ -1565,7 +1653,7 @@ render_from_filename_with_json_in_layout :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1582,11 +1670,14 @@ render_from_filename_with_json_in_layout_file :: proc(
 	json_filename: string,
 	layout_filename: string,
 	allocator := context.allocator,
-) -> (s: string, err: Render_Error) {
+) -> (
+	s: string,
+	err: Render_Error,
+) {
 	// Read template file and trim the trailing newline.
 	src, _ := os.read_entire_file_from_filename(filename, allocator)
-	if rune(src[len(src)-1]) == '\n' {
-		src = src[0:len(src)-1]
+	if rune(src[len(src) - 1]) == '\n' {
+		src = src[0:len(src) - 1]
 	}
 
 	// Read layout file.
@@ -1601,7 +1692,7 @@ render_from_filename_with_json_in_layout_file :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1624,17 +1715,20 @@ _main :: proc(
 	template_filename: string,
 	json_filename: string,
 	layout_filename: string = "",
-) -> (output: string, err: Render_Error) {
+) -> (
+	output: string,
+	err: Render_Error,
+) {
 	if !os.is_file(template_filename) {
-		return "", File_Not_Found_Error{filename=template_filename}
+		return "", File_Not_Found_Error{filename = template_filename}
 	}
 
 	if !os.is_file(json_filename) {
-		return "", File_Not_Found_Error{filename=json_filename}
+		return "", File_Not_Found_Error{filename = json_filename}
 	}
 
 	if layout_filename != "" && !os.is_file(layout_filename) {
-		return "", File_Not_Found_Error{filename=layout_filename}
+		return "", File_Not_Found_Error{filename = layout_filename}
 	}
 
 	if layout_filename != "" {
