@@ -550,7 +550,7 @@ lexer_append_newline :: proc(l: ^Lexer) {
 	append(&l.tokens, newline)
 }
 
-lexer_parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
+lexer_parse :: proc(l: ^Lexer, allocator := context.allocator) -> (err: Lexer_Error) {
 	for l.cursor < len(l.src) {
 		ch := rune(l.src[l.cursor])
 		defer { l.cursor += 1 }
@@ -560,44 +560,44 @@ lexer_parse :: proc(l: ^Lexer) -> (err: Lexer_Error) {
 		// comments are permitted), add the current chunk as a new Token, insert
 		// a special .Newline token, and then begin as a new .Text Token.
 		case ch == '\n' && l.cur_token_type != .Comment:
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Newline)
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Text)
 			l.line += 1
 		case lexer_peek(l, l.delim.otag_lit):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Tag_Literal_Triple)
 		case lexer_peek(l, l.delim.otag_section_open):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Section_Open)
 		case lexer_peek(l, l.delim.otag_section_close):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Section_Close)
 		case lexer_peek(l, l.delim.otag_inverted):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Section_Open_Inverted)
 		case lexer_peek(l, l.delim.otag_partial):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Partial)
 		case lexer_peek(l, l.delim.otag_literal):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Tag_Literal)
 		case lexer_peek(l, l.delim.otag_comment):
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Comment)
 		// Be careful with checking for "{{" -- it could be a substring of "{{{"
 		case lexer_peek(l, l.delim.otag) && l.cur_token_type != .Tag_Literal_Triple:
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Tag)
 		case lexer_peek(l, "}") && l.cur_token_type != .Text:
-			lexer_append(l)
+			lexer_append(l, allocator = allocator)
 			lexer_start(l, .Text)
 		}
 	}
 
 	// Add the last tag and mark that we hit the end of the file.
-	lexer_append(l)
+	lexer_append(l, allocator = allocator)
 	l.cur_token_type = .EOF
 	return nil
 }
@@ -975,7 +975,7 @@ template_insert_partial :: proc(
 	lexer.src = partial_str
 	lexer.line = token.pos.line
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Performs any indentation on the .Partial that we are inserting.
 	//
@@ -1023,7 +1023,7 @@ template_insert_content_into_layout :: proc(
 	lexer.src = content
 	lexer.line = token.pos.line
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Performs indentation on the content.
 	if offset > 0 {
@@ -1119,7 +1119,7 @@ template_render :: proc(
 		layout_lexer := lexer_make(allocator)
 		layout_lexer.src = tmpl.layout
 		layout_lexer.delim = CORE_DEF
-		lexer_parse(layout_lexer) or_return
+		lexer_parse(layout_lexer, allocator = allocator) or_return
 
 		// The Layout template will have no partials or layouts.
 		// layout_template: Template
@@ -1285,7 +1285,7 @@ render :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template
 	template := template_make(lexer, allocator)
@@ -1306,7 +1306,7 @@ render_in_layout :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1332,7 +1332,7 @@ render_in_layout_file :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template
 	tmpl := template_make(lexer, allocator)
@@ -1358,7 +1358,7 @@ render_from_filename :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1388,7 +1388,7 @@ render_from_filename_in_layout :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1421,7 +1421,7 @@ render_from_filename_in_layout_file :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template
 	template := template_make(lexer, allocator)
@@ -1447,7 +1447,7 @@ render_with_json :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1473,7 +1473,7 @@ render_with_json_in_layout :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1503,7 +1503,7 @@ render_with_json_in_layout_file :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = template
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1533,7 +1533,7 @@ render_from_filename_with_json :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1565,7 +1565,7 @@ render_from_filename_with_json_in_layout :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
@@ -1601,7 +1601,7 @@ render_from_filename_with_json_in_layout_file :: proc(
 	lexer := lexer_make(allocator)
 	lexer.src = string(src)
 	lexer.delim = CORE_DEF
-	lexer_parse(lexer) or_return
+	lexer_parse(lexer, allocator = allocator) or_return
 
 	// Render template.
 	template := template_make(lexer, allocator)
