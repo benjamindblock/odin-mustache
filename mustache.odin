@@ -141,12 +141,12 @@ Data_Type :: enum {
 // Returns true if the value is one of the "falsey" values
 // for a context.
 @(private)
-_falsey_context := make(map[string]bool)
+_falsey_context: map[string]bool
 
 // Returns true if the value is one of the "falsey" values
 // for a context.
 @(private)
-_whitespace := make(map[rune]bool)
+_whitespace: map[rune]bool
 
 
 /*
@@ -1659,7 +1659,7 @@ _main :: proc(
 	Setup global vars.
 */
 @(init)
-init :: proc() {
+init :: proc "contextless" () {
 	// Returns true if the value is one of the "falsey" values
 	// for a context.
 	_falsey_context[FALSEY] = true
