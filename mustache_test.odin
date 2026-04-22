@@ -73,8 +73,8 @@ load_json :: proc(val: json.Value) -> (loaded: JSON_Data) {
 load_spec :: proc(filename: string) -> (json.Value) {
 	context.allocator = context.temp_allocator
 
-	data, ok := os.read_entire_file_from_filename(filename)
-	if !ok {
+	data, read_err := os.read_entire_file_from_path(filename, context.allocator)
+	if read_err != nil {
 		fmt.println("Failed to load the file!")
 		os.exit(1)
 	}
